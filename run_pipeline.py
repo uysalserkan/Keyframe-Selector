@@ -140,8 +140,14 @@ Examples:
     selection_group.add_argument(
         "--k-max",
         type=int,
-        default=50,
+        default=250,
         help="Maximum keyframes (default: 50)",
+    )
+    selection_group.add_argument(
+        "--min-gap",
+        type=int,
+        default=5,
+        help="Minimum frame gap between keyframes (default: 5, set 0 to disable)",
     )
     
     # Ablation toggles
@@ -219,6 +225,7 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
     # Selection
     if args.num_keyframes:
         config.selector.fixed_k = args.num_keyframes
+    config.selector.min_frame_gap = args.min_gap
     config.entropy_estimator.beta = args.beta
     config.entropy_estimator.k_min = args.k_min
     config.entropy_estimator.k_max = args.k_max

@@ -121,6 +121,14 @@ class SelectorConfig:
     
     # Number of samples for stochastic mode
     num_samples: int = 1
+    
+    # Minimum gap between selected frames (prevents temporal clustering)
+    # Set to 0 to disable
+    min_frame_gap: int = 5
+    
+    # Include detected change points in selection
+    # Ensures scene transitions are captured
+    include_change_points: bool = True
 
 
 @dataclass

@@ -81,9 +81,16 @@ class EntropyKEstimator:
             # Normalize mean_delta to reasonable range
             mean_delta = max(0.1, min(mean_delta, 2.0))
         
-        # Compute recommended K
+        # Compute recommended K using improved formula
+        # Original: K = β · log(N) · H · mean(Δ) → too conservative
+        # 
+        # Improved formula: K = β · sqrt(N) · H · (1 + mean(Δ))
+        # - sqrt(N) scales better than log(N) for typical video lengths
+        # - H (entropy) measures content diversity
+        # - (1 + mean_Δ) boosts for high-change videos
         n_frames = len(embeddings)
-        k_raw = self.config.beta * np.log(n_frames) * entropy * mean_delta
+        delta_factor = 1.0 + mean_delta  # Ranges from ~1.1 to ~2.5
+        k_raw = self.config.beta * np.sqrt(n_frames) * entropy * delta_factor
         
         # Clamp to bounds
         recommended_k = int(np.clip(k_raw, self.config.k_min, self.config.k_max))
@@ -130,7 +137,8 @@ class EntropyKEstimator:
         mean_delta = max(0.1, min(mean_delta, 2.0))
         
         n_frames = len(embeddings)
-        k_raw = self.config.beta * np.log(n_frames) * entropy * mean_delta
+        delta_factor = 1.0 + mean_delta
+        k_raw = self.config.beta * np.sqrt(n_frames) * entropy * delta_factor
         recommended_k = int(np.clip(k_raw, self.config.k_min, self.config.k_max))
         recommended_k = min(recommended_k, n_frames)
         
@@ -246,13 +254,13 @@ def compute_adaptive_k(
     """
     Compute adaptive keyframe count.
     
-    K = β · log(N) · H · mean(Δ)
+    K = β · sqrt(N) · H · (1 + mean(Δ))
     
     Args:
         n_frames: Number of frames.
-        entropy: Normalized entropy value.
+        entropy: Normalized entropy value (0-1).
         mean_delta: Average temporal change.
-        beta: Scaling factor.
+        beta: Scaling factor (default 1.0, typical range 0.5-2.0).
         k_min: Minimum K.
         k_max: Maximum K.
     
@@ -262,7 +270,8 @@ def compute_adaptive_k(
     if n_frames < 2:
         return k_min
     
-    k_raw = beta * np.log(n_frames) * entropy * mean_delta
+    delta_factor = 1.0 + mean_delta
+    k_raw = beta * np.sqrt(n_frames) * entropy * delta_factor
     k = int(np.clip(k_raw, k_min, k_max))
     k = min(k, n_frames)
     

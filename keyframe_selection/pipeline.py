@@ -192,18 +192,23 @@ class KeyframeSelectionPipeline:
             temporal_result = self.temporal_analyzer.compute(embedding_batch)
         timing["temporal_analysis"] = t.elapsed
         
-        # Stage 4: Entropy-based K estimation
+        # Stage 4: K determination (fixed or entropy-based)
         with Timer("4_entropy_estimation", log=self.config.verbose) as t:
-            if self.config.use_entropy_k:
+            # If user specified fixed_k, always use it (override entropy)
+            if self.config.selector.fixed_k is not None:
+                k = self.config.selector.fixed_k
+                entropy_result = None
+                logger.info(f"Using fixed K={k} (--no-entropy-k not needed when -k is specified)")
+            elif self.config.use_entropy_k:
                 entropy_result = self.entropy_estimator.estimate(
                     embedding_batch,
                     temporal_result,
                 )
                 k = entropy_result.recommended_k
             else:
-                # Use fixed K from selector config
+                # Fallback default
                 entropy_result = None
-                k = self.config.selector.fixed_k or 10
+                k = 10
         timing["entropy_estimation"] = t.elapsed
         
         logger.info(f"Target keyframe count K={k}")
@@ -219,10 +224,16 @@ class KeyframeSelectionPipeline:
         
         # Stage 6: Keyframe selection
         with Timer("6_selection", log=self.config.verbose) as t:
+            # Pass change points if configured to include them
+            change_points = None
+            if self.config.selector.include_change_points and temporal_result is not None:
+                change_points = temporal_result.change_points
+            
             keyframe_result = self.selector.select_from_embeddings(
                 embedding_batch,
                 dpp_kernel,
                 k=k,
+                change_points=change_points,
             )
         timing["selection"] = t.elapsed
         
