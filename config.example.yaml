@@ -1,0 +1,75 @@
+# Keyframe Selection Pipeline Configuration
+# ==========================================
+# This file documents all available hyperparameters (H1-H10)
+# Copy this file and modify as needed for your experiments.
+
+# Input settings
+video_path: null  # Path to video file (use this OR frame_dir)
+frame_dir: ./frames  # Path to pre-extracted frames directory
+
+# Output settings
+output_dir: ./output
+save_intermediate: false  # Save embeddings, kernels for analysis
+
+# Frame Sampling (H2)
+frame_sampling:
+  fps: 1.0  # Frames per second to sample
+  adaptive: false  # Enable scene-change based sampling
+  adaptive_threshold: 30.0
+  output_format: jpg
+  jpeg_quality: 95
+
+# CLIP Encoder (H1, H4)
+clip_encoder:
+  model_name: "ViT-L/14"  # H1: CLIP model variant
+  # Options: ViT-B/32, ViT-B/16, ViT-L/14, ViT-L/14@336px
+  temporal_weight: 0.1  # H4: Temporal encoding weight α
+  batch_size: 32
+  use_fp16: true  # Mixed precision (faster on GPU)
+  device: null  # null = auto-detect
+
+# Temporal Analysis (H3)
+temporal_analysis:
+  delta_percentile: 90.0  # H3: Percentile for change threshold τΔ
+  use_ema_smoothing: false  # Smooth noisy deltas
+  ema_alpha: 0.3
+  min_segment_frames: 3  # Minimum gap between change points
+
+# Entropy-based K Estimation (H5, H6)
+entropy_estimator:
+  num_bins: 50  # H5: Histogram bins for entropy
+  beta: 1.0  # H6: Scaling factor β for K
+  pca_components: 32  # Dimensionality reduction
+  k_min: 3  # Minimum keyframes
+  k_max: 50  # Maximum keyframes
+  epsilon: 1.0e-10
+
+# DPP Kernel (H7, H8)
+dpp_kernel:
+  sigma_f: null  # H7: Feature bandwidth (null = median heuristic)
+  sigma_t_ratio: 0.2  # H8: Temporal bandwidth as fraction of duration
+  combine_method: hadamard  # Options: hadamard, additive
+  use_gpu: true
+
+# Selector (H9)
+selector:
+  mode: sample  # H9: DPP mode (sample = stochastic, map = greedy)
+  fixed_k: null  # Override adaptive K (null = use entropy-based)
+  seed: 42
+  num_samples: 1
+
+# Motion Awareness (H10)
+motion:
+  enabled: false  # Enable optical flow features
+  gamma: 0.1  # H10: Motion encoding weight γ
+  method: farneback  # Options: farneback, raft
+  flow_scale: 0.5  # Downscale for faster computation
+
+# Ablation Toggles
+use_temporal_encoding: true  # Enable/disable H4
+use_entropy_k: true  # Enable/disable adaptive K
+use_temporal_kernel: true  # Enable/disable temporal DPP kernel
+
+# Global Settings
+random_seed: 42
+verbose: true
