@@ -18,3 +18,13 @@
 
 .DS_Store
 .cursor/*
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+
+
+
