@@ -11,6 +11,10 @@ frame_dir: ./frames  # Path to pre-extracted frames directory
 output_dir: ./output
 save_intermediate: false  # Save embeddings, kernels for analysis
 
+# Encoder Backend Selection
+# Options: "clip" (OpenAI CLIP) or "dinov3" (Meta DINOv2/v3 via Hugging Face)
+encoder_backend: clip
+
 # Frame Sampling (H2)
 frame_sampling:
   fps: 1.0  # Frames per second to sample
@@ -19,11 +23,22 @@ frame_sampling:
   output_format: jpg
   jpeg_quality: 95
 
-# CLIP Encoder (H1, H4)
+# CLIP Encoder (H1, H4) - used when encoder_backend: clip
 clip_encoder:
   model_name: "ViT-L/14"  # H1: CLIP model variant
   # Options: ViT-B/32, ViT-B/16, ViT-L/14, ViT-L/14@336px
   temporal_weight: 0.1  # H4: Temporal encoding weight α
+  batch_size: 32
+  use_fp16: true  # Mixed precision (faster on GPU)
+  device: null  # null = auto-detect
+
+# DINOv3 Encoder (H1, H4) - used when encoder_backend: dinov3
+dinov3_encoder:
+  model_id: "facebook/dinov2-base"  # H1: DINOv2/v3 model from Hugging Face
+  # Options: facebook/dinov2-small, facebook/dinov2-base, facebook/dinov2-large, facebook/dinov2-giant
+  revision: null  # Model revision for reproducibility (null = latest)
+  temporal_weight: 0.1  # H4: Temporal encoding weight α
+  pooling: cls  # Options: cls (CLS token), mean (mean of patches)
   batch_size: 32
   use_fp16: true  # Mixed precision (faster on GPU)
   device: null  # null = auto-detect

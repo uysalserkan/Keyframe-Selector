@@ -3,11 +3,17 @@
 CLI entry point for the keyframe selection pipeline.
 
 Usage:
-    # From video file
+    # From video file (default: CLIP encoder)
     python run_pipeline.py --video /path/to/video.mp4 --output ./output
     
     # From pre-extracted frames
     python run_pipeline.py --frames ./frames --output ./output
+    
+    # Use DINOv3 encoder instead of CLIP
+    python run_pipeline.py --frames ./frames --encoder dinov3
+    
+    # Use specific DINOv3 model
+    python run_pipeline.py --frames ./frames --encoder dinov3 --dinov3-model-id facebook/dinov2-large
     
     # With custom config file
     python run_pipeline.py --config config.yaml
@@ -35,15 +41,21 @@ from keyframe_selection.utils.io import setup_logging, load_config, save_config
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Temporal-Aware CLIP + DPP Keyframe Selection",
+        description="Temporal-Aware Keyframe Selection with DPP (CLIP or DINOv3 embeddings)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Process video file
+  # Process video file (default: CLIP encoder)
   python run_pipeline.py --video video.mp4 --output results/
   
   # Process pre-extracted frames
   python run_pipeline.py --frames ./frames/ --output results/
+  
+  # Use DINOv3 encoder instead of CLIP
+  python run_pipeline.py --frames ./frames/ --encoder dinov3
+  
+  # Use specific DINOv3 model variant
+  python run_pipeline.py --frames ./frames/ --encoder dinov3 --dinov3-model-id facebook/dinov2-large
   
   # Use config file
   python run_pipeline.py --config my_config.yaml
@@ -102,8 +114,24 @@ Examples:
         help="Enable adaptive scene-based sampling",
     )
     
-    # CLIP options
-    clip_group = parser.add_argument_group("CLIP Encoder")
+    # Encoder backend selection
+    encoder_group = parser.add_argument_group("Encoder")
+    encoder_group.add_argument(
+        "--encoder",
+        type=str,
+        default="clip",
+        choices=["clip", "dinov3"],
+        help="Encoder backend: 'clip' (OpenAI CLIP) or 'dinov3' (Meta DINOv2/v3) (default: clip)",
+    )
+    encoder_group.add_argument(
+        "--temporal-weight",
+        type=float,
+        default=0.1,
+        help="Temporal encoding weight α (default: 0.1, applies to both encoders)",
+    )
+    
+    # CLIP-specific options
+    clip_group = parser.add_argument_group("CLIP Encoder Options (when --encoder clip)")
     clip_group.add_argument(
         "--model",
         type=str,
@@ -111,11 +139,28 @@ Examples:
         choices=["ViT-B/32", "ViT-B/16", "ViT-L/14", "ViT-L/14@336px"],
         help="CLIP model variant (default: ViT-L/14)",
     )
-    clip_group.add_argument(
-        "--temporal-weight",
-        type=float,
-        default=0.1,
-        help="Temporal encoding weight α (default: 0.1)",
+    
+    # DINOv3-specific options
+    dinov3_group = parser.add_argument_group("DINOv3 Encoder Options (when --encoder dinov3)")
+    dinov3_group.add_argument(
+        "--dinov3-model-id",
+        type=str,
+        default="facebook/dinov2-base",
+        help="Hugging Face model ID for DINOv3 (default: facebook/dinov2-base). "
+             "Options: facebook/dinov2-small, facebook/dinov2-base, facebook/dinov2-large, facebook/dinov2-giant",
+    )
+    dinov3_group.add_argument(
+        "--dinov3-revision",
+        type=str,
+        default=None,
+        help="Model revision/commit hash for reproducibility (default: latest)",
+    )
+    dinov3_group.add_argument(
+        "--dinov3-pooling",
+        type=str,
+        default="cls",
+        choices=["cls", "mean"],
+        help="Pooling strategy for DINOv3: 'cls' (CLS token) or 'mean' (mean of patches) (default: cls)",
     )
     
     # Selection options
@@ -218,9 +263,19 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
     config.frame_sampling.fps = args.fps
     config.frame_sampling.adaptive = args.adaptive_sampling
     
-    # CLIP encoder
+    # Encoder backend selection
+    config.encoder_backend = args.encoder  # type: ignore
+    
+    # CLIP encoder settings
     config.clip_encoder.model_name = args.model
     config.clip_encoder.temporal_weight = args.temporal_weight
+    
+    # DINOv3 encoder settings
+    config.dinov3_encoder.model_id = args.dinov3_model_id
+    config.dinov3_encoder.temporal_weight = args.temporal_weight
+    config.dinov3_encoder.pooling = args.dinov3_pooling  # type: ignore
+    if args.dinov3_revision:
+        config.dinov3_encoder.revision = args.dinov3_revision
     
     # Selection
     if args.num_keyframes:
@@ -277,7 +332,16 @@ def main():
     logger.info("=" * 60)
     logger.info(f"Input: {config.video_path or config.frame_dir}")
     logger.info(f"Output: {config.output_dir}")
-    logger.info(f"CLIP Model: {config.clip_encoder.model_name}")
+    
+    # Log encoder-specific information
+    if config.encoder_backend == "dinov3":
+        logger.info(f"Encoder: DINOv3 ({config.dinov3_encoder.model_id})")
+        logger.info(f"DINOv3 Pooling: {config.dinov3_encoder.pooling}")
+        logger.info(f"Temporal Weight: {config.dinov3_encoder.temporal_weight}")
+    else:
+        logger.info(f"Encoder: CLIP ({config.clip_encoder.model_name})")
+        logger.info(f"Temporal Weight: {config.clip_encoder.temporal_weight}")
+    
     logger.info(f"FPS: {config.frame_sampling.fps}")
     logger.info(f"Temporal Encoding: {config.use_temporal_encoding}")
     logger.info(f"Entropy-based K: {config.use_entropy_k}")

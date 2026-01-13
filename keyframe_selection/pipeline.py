@@ -20,6 +20,7 @@ from .types import (
 )
 from .frame_sampling import FrameSampler
 from .clip_encoder import CLIPTemporalEncoder
+from .dinov3_encoder import DINOv3TemporalEncoder
 from .temporal_analysis import TemporalDeltaComputer
 from .entropy_estimator import EntropyKEstimator
 from .dpp_kernel import DPPKernelBuilder
@@ -30,6 +31,9 @@ from .utils.io import set_global_seed, ensure_dir
 
 logger = logging.getLogger(__name__)
 
+# Type alias for image encoders
+ImageEncoder = Union[CLIPTemporalEncoder, DINOv3TemporalEncoder]
+
 
 class KeyframeSelectionPipeline:
     """
@@ -37,7 +41,7 @@ class KeyframeSelectionPipeline:
     
     Orchestrates all stages:
         1. Frame sampling (from video or directory)
-        2. CLIP embedding extraction with temporal encoding
+        2. Image embedding extraction with temporal encoding (CLIP or DINOv3)
         3. Optional motion feature extraction
         4. Temporal change analysis
         5. Entropy-based K estimation
@@ -49,6 +53,10 @@ class KeyframeSelectionPipeline:
         - Entropy-based adaptive K
         - Temporal kernel in DPP
         - Motion awareness (H10)
+    
+    Supports multiple encoder backends:
+        - "clip": OpenAI CLIP models (default)
+        - "dinov3": Meta DINOv2/v3 models via Hugging Face
     """
     
     def __init__(self, config: Optional[PipelineConfig] = None):
@@ -65,7 +73,7 @@ class KeyframeSelectionPipeline:
         
         # Initialize modules lazily
         self._frame_sampler: Optional[FrameSampler] = None
-        self._clip_encoder: Optional[CLIPTemporalEncoder] = None
+        self._image_encoder: Optional[ImageEncoder] = None
         self._motion_encoder: Optional[MotionEncoder] = None
         self._temporal_analyzer: Optional[TemporalDeltaComputer] = None
         self._entropy_estimator: Optional[EntropyKEstimator] = None
@@ -79,10 +87,39 @@ class KeyframeSelectionPipeline:
         return self._frame_sampler
     
     @property
+    def image_encoder(self) -> ImageEncoder:
+        """
+        Get the image encoder based on config.encoder_backend.
+        
+        Returns:
+            CLIPTemporalEncoder if backend is "clip",
+            DINOv3TemporalEncoder if backend is "dinov3".
+        """
+        if self._image_encoder is None:
+            if self.config.encoder_backend == "dinov3":
+                self._image_encoder = DINOv3TemporalEncoder(self.config.dinov3_encoder)
+                logger.info(f"Using DINOv3 encoder: {self.config.dinov3_encoder.model_id}")
+            else:
+                # Default to CLIP
+                self._image_encoder = CLIPTemporalEncoder(self.config.clip_encoder)
+                logger.info(f"Using CLIP encoder: {self.config.clip_encoder.model_name}")
+        return self._image_encoder
+    
+    @property
     def clip_encoder(self) -> CLIPTemporalEncoder:
-        if self._clip_encoder is None:
-            self._clip_encoder = CLIPTemporalEncoder(self.config.clip_encoder)
-        return self._clip_encoder
+        """
+        Get CLIP encoder (for backward compatibility).
+        
+        Note: Prefer using `image_encoder` property for new code.
+        """
+        if self.config.encoder_backend != "clip":
+            logger.warning(
+                "Accessing clip_encoder property but encoder_backend is "
+                f"'{self.config.encoder_backend}'. Consider using image_encoder instead."
+            )
+        if self._image_encoder is None:
+            self._image_encoder = CLIPTemporalEncoder(self.config.clip_encoder)
+        return self._image_encoder  # type: ignore
     
     @property
     def motion_encoder(self) -> MotionEncoder:
@@ -160,12 +197,14 @@ class KeyframeSelectionPipeline:
         
         logger.info(f"Loaded {len(frame_batch)} frames")
         
-        # Stage 2: CLIP encoding with temporal encoding
-        with Timer("2_clip_encoding", log=self.config.verbose) as t:
-            embedding_batch = self.clip_encoder.encode(
+        # Stage 2: Image encoding with temporal encoding (CLIP or DINOv3)
+        encoder_name = self.config.encoder_backend.upper()
+        with Timer(f"2_{self.config.encoder_backend}_encoding", log=self.config.verbose) as t:
+            embedding_batch = self.image_encoder.encode(
                 frame_batch,
                 add_temporal=self.config.use_temporal_encoding,
             )
+        # Keep timing key as "clip_encoding" for backward compatibility
         timing["clip_encoding"] = t.elapsed
         
         # Stage 2b: Optional motion encoding
@@ -320,6 +359,8 @@ def run_pipeline(
     use_entropy_k: bool = True,
     use_motion: bool = False,
     model_name: str = "ViT-L/14",
+    encoder_backend: str = "clip",
+    dinov3_model_id: str = "facebook/dinov2-base",
     seed: int = 42,
 ) -> PipelineResult:
     """
@@ -334,7 +375,9 @@ def run_pipeline(
         use_temporal: Enable temporal encoding.
         use_entropy_k: Enable entropy-based K.
         use_motion: Enable motion features.
-        model_name: CLIP model name.
+        model_name: CLIP model name (used when encoder_backend="clip").
+        encoder_backend: Encoder backend ("clip" or "dinov3").
+        dinov3_model_id: DINOv3 model ID (used when encoder_backend="dinov3").
         seed: Random seed.
     
     Returns:
@@ -344,6 +387,7 @@ def run_pipeline(
         PipelineConfig,
         FrameSamplingConfig,
         CLIPEncoderConfig,
+        DINOv3EncoderConfig,
         SelectorConfig,
         MotionConfig,
     )
@@ -352,8 +396,10 @@ def run_pipeline(
         video_path=Path(video_path) if video_path else None,
         frame_dir=Path(frame_dir) if frame_dir else None,
         output_dir=Path(output_dir),
+        encoder_backend=encoder_backend,  # type: ignore
         frame_sampling=FrameSamplingConfig(fps=fps),
         clip_encoder=CLIPEncoderConfig(model_name=model_name),
+        dinov3_encoder=DINOv3EncoderConfig(model_id=dinov3_model_id),
         selector=SelectorConfig(fixed_k=k, seed=seed),
         motion=MotionConfig(enabled=use_motion),
         use_temporal_encoding=use_temporal,

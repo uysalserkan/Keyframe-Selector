@@ -54,6 +54,34 @@ class CLIPEncoderConfig:
 
 
 @dataclass
+class DINOv3EncoderConfig:
+    """Configuration for DINOv3 embedding extraction via Hugging Face Transformers."""
+    
+    # Model identifier on Hugging Face Hub
+    # Options include:
+    #   - facebook/dinov2-small, facebook/dinov2-base, facebook/dinov2-large
+    #   - facebook/dinov2-giant
+    model_id: str = "facebook/dinov2-base"
+    
+    # Model revision for reproducibility (None = latest)
+    revision: Optional[str] = None
+    
+    # H4: Temporal encoding weight α (same semantics as CLIP)
+    temporal_weight: float = 0.1
+    
+    # Pooling strategy for CLS token extraction
+    # Options: "cls" (CLS token), "mean" (mean of patch tokens)
+    pooling: Literal["cls", "mean"] = "cls"
+    
+    # Processing settings
+    batch_size: int = 32
+    use_fp16: bool = True  # Mixed precision for faster inference on CUDA
+    
+    # Device selection (auto-detected if None)
+    device: Optional[str] = None
+
+
+@dataclass
 class TemporalAnalysisConfig:
     """Configuration for temporal change analysis."""
     
@@ -160,9 +188,13 @@ class PipelineConfig:
     output_dir: Path = field(default_factory=lambda: Path("output"))
     save_intermediate: bool = False
     
+    # Encoder backend selection
+    encoder_backend: Literal["clip", "dinov3"] = "clip"
+    
     # Stage configurations
     frame_sampling: FrameSamplingConfig = field(default_factory=FrameSamplingConfig)
     clip_encoder: CLIPEncoderConfig = field(default_factory=CLIPEncoderConfig)
+    dinov3_encoder: DINOv3EncoderConfig = field(default_factory=DINOv3EncoderConfig)
     temporal_analysis: TemporalAnalysisConfig = field(default_factory=TemporalAnalysisConfig)
     entropy_estimator: EntropyEstimatorConfig = field(default_factory=EntropyEstimatorConfig)
     dpp_kernel: DPPKernelConfig = field(default_factory=DPPKernelConfig)
@@ -193,6 +225,7 @@ class PipelineConfig:
         # Extract nested configs
         frame_sampling = FrameSamplingConfig(**config_dict.pop("frame_sampling", {}))
         clip_encoder = CLIPEncoderConfig(**config_dict.pop("clip_encoder", {}))
+        dinov3_encoder = DINOv3EncoderConfig(**config_dict.pop("dinov3_encoder", {}))
         temporal_analysis = TemporalAnalysisConfig(**config_dict.pop("temporal_analysis", {}))
         entropy_estimator = EntropyEstimatorConfig(**config_dict.pop("entropy_estimator", {}))
         dpp_kernel = DPPKernelConfig(**config_dict.pop("dpp_kernel", {}))
@@ -202,6 +235,7 @@ class PipelineConfig:
         return cls(
             frame_sampling=frame_sampling,
             clip_encoder=clip_encoder,
+            dinov3_encoder=dinov3_encoder,
             temporal_analysis=temporal_analysis,
             entropy_estimator=entropy_estimator,
             dpp_kernel=dpp_kernel,
