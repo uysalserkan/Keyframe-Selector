@@ -233,11 +233,14 @@ class KeyframeSelectionPipeline:
         
         # Stage 4: K determination (fixed or entropy-based)
         with Timer("4_entropy_estimation", log=self.config.verbose) as t:
-            # If user specified fixed_k, always use it (override entropy)
-            if self.config.selector.fixed_k is not None:
+            # Skip entropy estimation for HDBSCAN (which determines K automatically)
+            if self.config.selector.method == "hdbscan":
+                k = None  # Will be ignored by HDBSCAN selector
+                entropy_result = None
+            elif self.config.selector.fixed_k is not None:
                 k = self.config.selector.fixed_k
                 entropy_result = None
-                logger.info(f"Using fixed K={k} (--no-entropy-k not needed when -k is specified)")
+                logger.info(f"Using fixed K={k}")
             elif self.config.use_entropy_k:
                 entropy_result = self.entropy_estimator.estimate(
                     embedding_batch,
@@ -250,16 +253,20 @@ class KeyframeSelectionPipeline:
                 k = 10
         timing["entropy_estimation"] = t.elapsed
         
-        logger.info(f"Target keyframe count K={k}")
+        logger.info(f"Target keyframe count K={k if k is not None else 'auto (HDBSCAN)'}")
         
-        # Stage 5: DPP kernel construction
-        with Timer("5_dpp_kernel", log=self.config.verbose) as t:
-            dpp_kernel = self.kernel_builder.build(
-                embedding_batch,
-                video_duration=frame_batch.video_duration,
-                use_temporal=self.config.use_temporal_kernel,
-            )
-        timing["dpp_kernel"] = t.elapsed
+        # Stage 5: DPP kernel construction (only if using DPP)
+        dpp_kernel = None
+        if self.config.selector.method == "dpp":
+            with Timer("5_dpp_kernel", log=self.config.verbose) as t:
+                dpp_kernel = self.kernel_builder.build(
+                    embedding_batch,
+                    video_duration=frame_batch.video_duration,
+                    use_temporal=self.config.use_temporal_kernel,
+                )
+            timing["dpp_kernel"] = t.elapsed
+        else:
+            timing["dpp_kernel"] = 0.0
         
         # Stage 6: Keyframe selection
         with Timer("6_selection", log=self.config.verbose) as t:
@@ -270,7 +277,7 @@ class KeyframeSelectionPipeline:
             
             keyframe_result = self.selector.select_from_embeddings(
                 embedding_batch,
-                dpp_kernel,
+                dpp_kernel,  # None for kmeans/hdbscan
                 k=k,
                 change_points=change_points,
             )

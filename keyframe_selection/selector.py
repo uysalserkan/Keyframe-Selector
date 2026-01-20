@@ -121,23 +121,35 @@ class DPPSelector:
     def select_from_embeddings(
         self,
         embedding_batch: EmbeddingBatch,
-        kernel: DPPKernel,
-        k: int,
+        kernel: Optional[DPPKernel] = None,
+        k: Optional[int] = None,
         change_points: Optional[NDArray[np.int64]] = None,
     ) -> KeyframeResult:
         """
         Select keyframes with full metadata from embedding batch.
         
+        Supports multiple selection methods: DPP, K-means, HDBSCAN.
+        
         Args:
             embedding_batch: Source embeddings.
-            kernel: DPP kernel.
-            k: Number of keyframes to select.
+            kernel: DPP kernel (required for DPP, ignored for other methods).
+            k: Number of keyframes to select (required for DPP and K-means, ignored for HDBSCAN).
             change_points: Optional array of change point indices to prioritize.
         
         Returns:
             KeyframeResult with indices and timestamps.
         """
-        result = self.select(kernel, k, embedding_batch.timestamps, change_points)
+        # Dispatch to appropriate selection method
+        if self.config.method == "dpp":
+            if kernel is None:
+                raise ValueError("DPP method requires kernel parameter")
+            result = self.select(kernel, k, embedding_batch.timestamps, change_points)
+        elif self.config.method == "kmeans":
+            result = self._select_kmeans(embedding_batch, k, change_points)
+        elif self.config.method == "hdbscan":
+            result = self._select_hdbscan(embedding_batch, change_points)
+        else:
+            raise ValueError(f"Unknown selection method: {self.config.method}")
         
         # Add frame indices mapping
         if len(embedding_batch.frame_indices) > 0:
@@ -310,6 +322,196 @@ class DPPSelector:
                 remove_neighbors(best_idx)
         
         return np.array(selected, dtype=np.int64)
+
+
+    def _select_kmeans(
+        self,
+        embedding_batch: EmbeddingBatch,
+        k: Optional[int] = None,
+        change_points: Optional[NDArray[np.int64]] = None,
+    ) -> KeyframeResult:
+        """
+        Select keyframes using K-means clustering.
+        
+        Selects the medoid (frame closest to cluster center) from each cluster.
+        
+        Args:
+            embedding_batch: Batch of frame embeddings.
+            k: Number of clusters (keyframes to select). Uses fixed_k from config if None.
+            change_points: Optional change points (not used for K-means but kept for interface consistency).
+        
+        Returns:
+            KeyframeResult with selected indices.
+        """
+        from sklearn.cluster import KMeans
+        
+        if k is None:
+            k = self.config.fixed_k
+        
+        if k is None:
+            raise ValueError("k must be specified either in call or config.fixed_k")
+        
+        embeddings = embedding_batch.effective_embeddings
+        n = len(embeddings)
+        k = min(k, n)
+        
+        if k <= 0 or n == 0:
+            return KeyframeResult(
+                indices=np.array([], dtype=np.int64),
+                timestamps=np.array([], dtype=np.float64),
+                metadata={"method": "kmeans", "k": 0, "n": n},
+            )
+        
+        logger.info(f"Selecting {k} keyframes using K-means clustering")
+        
+        # Fit K-means
+        kmeans = KMeans(
+            n_clusters=k,
+            init=self.config.kmeans_init,
+            n_init=self.config.kmeans_n_init,
+            max_iter=self.config.kmeans_max_iter,
+            random_state=self.config.seed,
+        )
+        labels = kmeans.fit_predict(embeddings)
+        
+        # Select medoid from each cluster
+        selected_indices = []
+        for cluster_id in range(k):
+            cluster_mask = labels == cluster_id
+            if not np.any(cluster_mask):
+                continue
+            
+            cluster_embeddings = embeddings[cluster_mask]
+            cluster_indices = np.where(cluster_mask)[0]
+            center = kmeans.cluster_centers_[cluster_id]
+            
+            # Find frame closest to cluster center
+            distances = np.linalg.norm(cluster_embeddings - center, axis=1)
+            medoid_idx = cluster_indices[np.argmin(distances)]
+            selected_indices.append(medoid_idx)
+        
+        selected_indices = np.array(selected_indices, dtype=np.int64)
+        
+        # Apply min_frame_gap filter if configured
+        if self.config.min_frame_gap > 0:
+            selected_indices = self._apply_min_gap_filter(selected_indices)
+        
+        # Sort by time order
+        selected_indices = np.sort(selected_indices)
+        
+        # Get timestamps if provided
+        if len(embedding_batch.timestamps) > 0:
+            selected_timestamps = embedding_batch.timestamps[selected_indices]
+        else:
+            selected_timestamps = selected_indices.astype(np.float64)
+        
+        logger.info(f"K-means selected {len(selected_indices)} keyframes from {n} frames")
+        
+        return KeyframeResult(
+            indices=selected_indices,
+            timestamps=selected_timestamps,
+            metadata={
+                "method": "kmeans",
+                "k": len(selected_indices),
+                "n": n,
+                "n_clusters_requested": k,
+            },
+        )
+    
+    def _select_hdbscan(
+        self,
+        embedding_batch: EmbeddingBatch,
+        change_points: Optional[NDArray[np.int64]] = None,
+    ) -> KeyframeResult:
+        """
+        Select keyframes using HDBSCAN density-based clustering.
+        
+        Automatically determines the number of clusters based on density.
+        Selects the medoid from each cluster (including noise).
+        
+        Args:
+            embedding_batch: Batch of frame embeddings.
+            change_points: Optional change points (not used for HDBSCAN but kept for interface consistency).
+        
+        Returns:
+            KeyframeResult with selected indices (variable number based on density).
+        """
+        from sklearn.cluster import HDBSCAN
+        
+        embeddings = embedding_batch.effective_embeddings
+        n = len(embeddings)
+        
+        if n == 0:
+            return KeyframeResult(
+                indices=np.array([], dtype=np.int64),
+                timestamps=np.array([], dtype=np.float64),
+                metadata={"method": "hdbscan", "n_clusters": 0},
+            )
+        
+        logger.info("Selecting keyframes using HDBSCAN density-based clustering")
+        
+        # Configure HDBSCAN
+        min_samples = self.config.hdbscan_min_samples
+        if min_samples is None:
+            min_samples = self.config.hdbscan_min_cluster_size
+        
+        hdbscan = HDBSCAN(
+            min_cluster_size=self.config.hdbscan_min_cluster_size,
+            min_samples=min_samples,
+            cluster_selection_epsilon=self.config.hdbscan_cluster_selection_epsilon,
+            cluster_selection_method=self.config.hdbscan_cluster_selection_method,
+        )
+        labels = hdbscan.fit_predict(embeddings)
+        
+        # Select medoid from each cluster (including noise cluster -1)
+        unique_labels = np.unique(labels)
+        selected_indices = []
+        
+        for label in unique_labels:
+            cluster_mask = labels == label
+            cluster_embeddings = embeddings[cluster_mask]
+            cluster_indices = np.where(cluster_mask)[0]
+            
+            # Compute medoid (point closest to cluster mean)
+            center = np.mean(cluster_embeddings, axis=0)
+            distances = np.linalg.norm(cluster_embeddings - center, axis=1)
+            medoid_idx = cluster_indices[np.argmin(distances)]
+            selected_indices.append(medoid_idx)
+        
+        selected_indices = np.array(selected_indices, dtype=np.int64)
+        
+        # Apply min_frame_gap filter if configured
+        if self.config.min_frame_gap > 0:
+            selected_indices = self._apply_min_gap_filter(selected_indices)
+        
+        # Sort by time order
+        selected_indices = np.sort(selected_indices)
+        
+        # Get timestamps if provided
+        if len(embedding_batch.timestamps) > 0:
+            selected_timestamps = embedding_batch.timestamps[selected_indices]
+        else:
+            selected_timestamps = selected_indices.astype(np.float64)
+        
+        n_noise = np.sum(labels == -1)
+        n_clusters = len(unique_labels)
+        
+        logger.info(
+            f"HDBSCAN found {n_clusters} clusters (including {n_noise} noise points), "
+            f"selected {len(selected_indices)} keyframes from {n} frames"
+        )
+        
+        return KeyframeResult(
+            indices=selected_indices,
+            timestamps=selected_timestamps,
+            metadata={
+                "method": "hdbscan",
+                "k": len(selected_indices),
+                "n": n,
+                "n_clusters": n_clusters,
+                "n_noise": int(n_noise),
+            },
+        )
 
 
 def select_keyframes_dpp(

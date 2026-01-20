@@ -17,6 +17,7 @@ Hyperparameter Reference:
 from dataclasses import dataclass, field
 from typing import Literal, Optional
 from pathlib import Path
+import yaml
 
 
 @dataclass
@@ -136,27 +137,57 @@ class DPPKernelConfig:
 
 @dataclass
 class SelectorConfig:
-    """Configuration for DPP subset selection."""
+    """Configuration for keyframe selection."""
     
-    # H9: DPP sampling mode
+    # Selection method: dpp, kmeans, or hdbscan
+    method: Literal["dpp", "kmeans", "hdbscan"] = "dpp"
+    
+    # === DPP-specific parameters ===
+    # H9: DPP sampling mode (only used when method="dpp")
     mode: Literal["sample", "map"] = "sample"  # sample = stochastic, map = deterministic
     
+    # === Common parameters ===
     # Override K from entropy estimator (None = use adaptive K)
+    # Not used for HDBSCAN (which determines K automatically)
     fixed_k: Optional[int] = None
     
     # Random seed for reproducibility
     seed: int = 42
     
-    # Number of samples for stochastic mode
+    # Number of samples for stochastic mode (only used when method="dpp" and mode="sample")
     num_samples: int = 1
     
     # Minimum gap between selected frames (prevents temporal clustering)
-    # Set to 0 to disable
+    # Set to 0 to disable. Applies to all selection methods.
     min_frame_gap: int = 5
     
-    # Include detected change points in selection
+    # Include detected change points in selection (only used when method="dpp")
     # Ensures scene transitions are captured
     include_change_points: bool = True
+    
+    # === K-means specific parameters ===
+    # Initialization method for K-means
+    kmeans_init: Literal["k-means++", "random"] = "k-means++"
+    
+    # Number of times K-means is run with different initializations
+    kmeans_n_init: int = 10
+    
+    # Maximum number of iterations for K-means
+    kmeans_max_iter: int = 300
+    
+    # === HDBSCAN specific parameters ===
+    # Minimum number of samples in a neighborhood for a point to be considered as a core point
+    hdbscan_min_cluster_size: int = 2
+    
+    # Minimum number of samples in a neighborhood for a point to be considered as part of a dense neighborhood
+    # If None, defaults to min_cluster_size
+    hdbscan_min_samples: Optional[int] = None
+    
+    # A distance threshold for cluster formation
+    hdbscan_cluster_selection_epsilon: float = 0.0
+    
+    # Method used to select clusters from the cluster hierarchy
+    hdbscan_cluster_selection_method: Literal["eom", "leaf"] = "eom"
 
 
 @dataclass
@@ -248,3 +279,7 @@ class PipelineConfig:
         """Serialize config to dictionary for logging/saving."""
         from dataclasses import asdict
         return asdict(self)
+    
+    def __str__(self) -> str:
+        """Return string representation of config."""
+        return yaml.dump(self.to_dict(), indent=4)
