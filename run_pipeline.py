@@ -119,7 +119,6 @@ Examples:
     encoder_group.add_argument(
         "--encoder",
         type=str,
-        default="clip",
         choices=["clip", "dinov3"],
         help="Encoder backend: 'clip' (OpenAI CLIP) or 'dinov3' (Meta DINOv2/v3) (default: clip)",
     )
@@ -166,9 +165,16 @@ Examples:
     # Selection options
     selection_group = parser.add_argument_group("Selection")
     selection_group.add_argument(
+        "--selection-method",
+        type=str,
+        choices=["dpp", "kmeans", "hdbscan"],
+        help="Selection method: 'dpp' (DPP diversity), 'kmeans' (K-means clustering), "
+             "'hdbscan' (density-based clustering) (default: dpp)",
+    )
+    selection_group.add_argument(
         "-k", "--num-keyframes",
         type=int,
-        help="Fixed number of keyframes (overrides adaptive K)",
+        help="Fixed number of keyframes (overrides adaptive K, not used for HDBSCAN)",
     )
     selection_group.add_argument(
         "--beta",
@@ -193,6 +199,56 @@ Examples:
         type=int,
         default=5,
         help="Minimum frame gap between keyframes (default: 5, set 0 to disable)",
+    )
+    
+    # K-means specific options
+    kmeans_group = parser.add_argument_group("K-means Options (when --selection-method kmeans)")
+    kmeans_group.add_argument(
+        "--kmeans-init",
+        type=str,
+        choices=["k-means++", "random"],
+        default="k-means++",
+        help="K-means initialization method (default: k-means++)",
+    )
+    kmeans_group.add_argument(
+        "--kmeans-n-init",
+        type=int,
+        default=10,
+        help="Number of K-means initializations (default: 10)",
+    )
+    kmeans_group.add_argument(
+        "--kmeans-max-iter",
+        type=int,
+        default=300,
+        help="Maximum K-means iterations (default: 300)",
+    )
+    
+    # HDBSCAN specific options
+    hdbscan_group = parser.add_argument_group("HDBSCAN Options (when --selection-method hdbscan)")
+    hdbscan_group.add_argument(
+        "--hdbscan-min-cluster-size",
+        type=int,
+        default=2,
+        help="HDBSCAN minimum cluster size (default: 2)",
+    )
+    hdbscan_group.add_argument(
+        "--hdbscan-min-samples",
+        type=int,
+        default=None,
+        help="HDBSCAN minimum samples (default: None, same as min-cluster-size)",
+    )
+    hdbscan_group.add_argument(
+        "--hdbscan-cluster-selection-epsilon",
+        type=float,
+        default=0.0,
+        help="HDBSCAN cluster selection epsilon (default: 0.0)",
+    )
+    hdbscan_group.add_argument(
+        "--hdbscan-cluster-selection-method",
+        type=str,
+        choices=["eom", "leaf"],
+        default="eom",
+        help="HDBSCAN cluster selection method (default: eom)",
     )
     
     # Ablation toggles
@@ -247,6 +303,7 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
     if args.config:
         config_dict = load_config(args.config)
         config = PipelineConfig.from_dict(config_dict)
+        return config
     else:
         config = PipelineConfig()
     
@@ -263,10 +320,13 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
     config.frame_sampling.fps = args.fps
     config.frame_sampling.adaptive = args.adaptive_sampling
     
-    # Encoder backend selection
-    config.encoder_backend = args.encoder  # type: ignore
+    # Encoder backend selection (only override if explicitly specified on CLI)
+    if args.encoder is not None:
+        config.encoder_backend = args.encoder  # type: ignore
     
     # CLIP encoder settings
+    # These use argparse defaults, so they'll override config values.
+    # This is acceptable behavior: CLI args take precedence over config file.
     config.clip_encoder.model_name = args.model
     config.clip_encoder.temporal_weight = args.temporal_weight
     
@@ -284,6 +344,23 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
     config.entropy_estimator.beta = args.beta
     config.entropy_estimator.k_min = args.k_min
     config.entropy_estimator.k_max = args.k_max
+    
+    # Selection method
+    if args.selection_method:
+        config.selector.method = args.selection_method  # type: ignore
+    
+    # K-means parameters
+    if args.kmeans_init:
+        config.selector.kmeans_init = args.kmeans_init  # type: ignore
+    config.selector.kmeans_n_init = args.kmeans_n_init
+    config.selector.kmeans_max_iter = args.kmeans_max_iter
+    
+    # HDBSCAN parameters
+    config.selector.hdbscan_min_cluster_size = args.hdbscan_min_cluster_size
+    if args.hdbscan_min_samples is not None:
+        config.selector.hdbscan_min_samples = args.hdbscan_min_samples
+    config.selector.hdbscan_cluster_selection_epsilon = args.hdbscan_cluster_selection_epsilon
+    config.selector.hdbscan_cluster_selection_method = args.hdbscan_cluster_selection_method  # type: ignore
     
     # Ablation toggles
     config.use_temporal_encoding = not args.no_temporal
@@ -347,6 +424,13 @@ def main():
     logger.info(f"Entropy-based K: {config.use_entropy_k}")
     logger.info(f"Temporal Kernel: {config.use_temporal_kernel}")
     logger.info(f"Motion Awareness: {config.motion.enabled}")
+    logger.info(f"Selection Method: {config.selector.method}")
+    if config.selector.method == "dpp":
+        logger.info(f"DPP Mode: {config.selector.mode}")
+    elif config.selector.method == "kmeans":
+        logger.info(f"K-means init: {config.selector.kmeans_init}, n_init: {config.selector.kmeans_n_init}")
+    elif config.selector.method == "hdbscan":
+        logger.info(f"HDBSCAN min_cluster_size: {config.selector.hdbscan_min_cluster_size}")
     if config.selector.fixed_k:
         logger.info(f"Fixed K: {config.selector.fixed_k}")
     logger.info("=" * 60)
