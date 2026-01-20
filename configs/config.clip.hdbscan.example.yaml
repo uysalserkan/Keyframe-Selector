@@ -1,0 +1,121 @@
+# Keyframe Selection Pipeline Configuration - DINOv3 Example
+# ===========================================================
+# This example uses Meta's DINOv2 model for embedding extraction.
+# DINOv2 provides strong self-supervised visual features.
+
+# Input settings
+video_path: "/Users/serkan.uysal/Downloads/dji_mimo_20260103_144920_20260103144919_1767445135722_video.MP4"  # Path to video file (use this OR frame_dir)
+frame_dir: null  # Path to pre-extracted frames directory
+
+# Output settings
+output_dir: ./dji_output5
+save_intermediate: false  # Save embeddings, kernels for analysis
+
+# Encoder Backend Selection
+# Use DINOv3 (DINOv2 via Hugging Face Transformers)
+encoder_backend: clip
+
+# Frame Sampling (H2)
+frame_sampling:
+  fps: 5.0  # Frames per second to sample
+  adaptive: true  # Enable scene-change based sampling
+  adaptive_threshold: 30.0
+  output_format: jpg
+  jpeg_quality: 95
+
+# DINOv3 Encoder Configuration
+dinov3_encoder:
+  # Model ID from Hugging Face Hub
+  # Available options:
+  #   - facebook/dinov2-small  (384 dim, fastest)
+  #   - facebook/dinov2-base   (768 dim, balanced)
+  #   - facebook/dinov2-large  (1024 dim, higher quality)
+  #   - facebook/dinov2-giant  (1536 dim, best quality, slowest)
+  model_id: "facebook/dinov2-large"
+  
+  # Model revision for reproducibility (null = latest)
+  revision: null
+  
+  # H4: Temporal encoding weight α
+  temporal_weight: 0.1
+  
+  # Pooling strategy for feature extraction
+  # Options:
+  #   - cls: Use CLS token (recommended for DINOv2)
+  #   - mean: Mean pool over patch tokens
+  pooling: cls
+  
+  # Processing settings
+  batch_size: 32
+  use_fp16: true  # Mixed precision (faster on GPU)
+  device: null  # null = auto-detect (cuda if available)
+
+# CLIP Encoder (not used when encoder_backend: dinov3, but kept for reference)
+clip_encoder:
+  model_name: "ViT-L/14"
+  temporal_weight: 0.1
+  batch_size: 32
+  use_fp16: true
+  device: null
+
+# Temporal Analysis (H3)
+temporal_analysis:
+  delta_percentile: 90.0  # H3: Percentile for change threshold τΔ
+  use_ema_smoothing: false  # Smooth noisy deltas
+  ema_alpha: 0.3
+  min_segment_frames: 3  # Minimum gap between change points
+
+# Entropy-based K Estimation (H5, H6)
+entropy_estimator:
+  num_bins: 50  # H5: Histogram bins for entropy
+  beta: 1.0  # H6: Scaling factor β for K
+  pca_components: 32  # Dimensionality reduction
+  k_min: 3  # Minimum keyframes
+  k_max: 50  # Maximum keyframes
+  epsilon: 1.0e-10
+
+# DPP Kernel (H7, H8)
+dpp_kernel:
+  sigma_f: null  # H7: Feature bandwidth (null = median heuristic)
+  sigma_t_ratio: 0.2  # H8: Temporal bandwidth as fraction of duration
+  combine_method: hadamard  # Options: hadamard, additive
+  use_gpu: true
+
+# Selector (H9)
+selector:
+  method: hdbscan  # Options: dpp, kmeans, hdbscan
+  
+  # DPP-specific (only used when method: dpp)
+  mode: sample  # H9: DPP mode (sample = stochastic, map = greedy)
+  fixed_k: null  # Override adaptive K (null = use entropy-based)
+  seed: 42
+  num_samples: 1
+  min_frame_gap: 5
+  include_change_points: true
+  
+  # K-means specific (only used when method: kmeans)
+  kmeans_init: k-means++  # Options: k-means++, random
+  kmeans_n_init: 10
+  kmeans_max_iter: 300
+  
+  # HDBSCAN specific (only used when method: hdbscan)
+  hdbscan_min_cluster_size: 2
+  hdbscan_min_samples: null  # null = same as min_cluster_size
+  hdbscan_cluster_selection_epsilon: 0.0
+  hdbscan_cluster_selection_method: eom  # Options: eom, leaf
+
+# Motion Awareness (H10)
+motion:
+  enabled: true  # Enable optical flow features
+  gamma: 0.1  # H10: Motion encoding weight γ
+  method: farneback  # Options: farneback, raft
+  flow_scale: 0.5  # Downscale for faster computation
+
+# Ablation Toggles
+use_temporal_encoding: true  # Enable/disable H4
+use_entropy_k: true  # Enable/disable adaptive K
+use_temporal_kernel: true  # Enable/disable temporal DPP kernel
+
+# Global Settings
+random_seed: 42
+verbose: true

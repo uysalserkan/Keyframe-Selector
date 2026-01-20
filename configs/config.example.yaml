@@ -68,10 +68,26 @@ dpp_kernel:
 
 # Selector (H9)
 selector:
+  method: dpp  # Options: dpp, kmeans, hdbscan
+  
+  # DPP-specific (only used when method: dpp)
   mode: sample  # H9: DPP mode (sample = stochastic, map = greedy)
   fixed_k: null  # Override adaptive K (null = use entropy-based)
   seed: 42
   num_samples: 1
+  min_frame_gap: 5
+  include_change_points: true
+  
+  # K-means specific (only used when method: kmeans)
+  kmeans_init: k-means++  # Options: k-means++, random
+  kmeans_n_init: 10
+  kmeans_max_iter: 300
+  
+  # HDBSCAN specific (only used when method: hdbscan)
+  hdbscan_min_cluster_size: 2
+  hdbscan_min_samples: null  # null = same as min_cluster_size
+  hdbscan_cluster_selection_epsilon: 0.0
+  hdbscan_cluster_selection_method: eom  # Options: eom, leaf
 
 # Motion Awareness (H10)
 motion:
