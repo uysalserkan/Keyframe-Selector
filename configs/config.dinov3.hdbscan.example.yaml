@@ -5,10 +5,10 @@
 
 # Input settings
 video_path: "/Users/serkan.uysal/Downloads/dji_mimo_20260103_144920_20260103144919_1767445135722_video.MP4"  # Path to video file (use this OR frame_dir)
-frame_dir: null  # Path to pre-extracted frames directory
+frame_dir: null # /Users/serkan.uysal/Documents/keyframe-selection-with-clip/dji_output1/frames  # Path to pre-extracted frames directory
 
 # Output settings
-output_dir: ./dji_output6
+output_dir: ./dji_output_15fps
 save_intermediate: false  # Save embeddings, kernels for analysis
 
 # Encoder Backend Selection
@@ -17,9 +17,9 @@ encoder_backend: dinov3
 
 # Frame Sampling (H2)
 frame_sampling:
-  fps: 5.0  # Frames per second to sample
+  fps: 15.0  # Frames per second to sample
   adaptive: true  # Enable scene-change based sampling
-  adaptive_threshold: 30.0
+  adaptive_threshold: 10.0
   output_format: jpg
   jpeg_quality: 95
 
@@ -60,24 +60,24 @@ clip_encoder:
 
 # Temporal Analysis (H3)
 temporal_analysis:
-  delta_percentile: 90.0  # H3: Percentile for change threshold τΔ
+  delta_percentile: 50.0  # H3: Percentile for change threshold τΔ
   use_ema_smoothing: false  # Smooth noisy deltas
-  ema_alpha: 0.3
+  ema_alpha: 0.6
   min_segment_frames: 3  # Minimum gap between change points
 
 # Entropy-based K Estimation (H5, H6)
 entropy_estimator:
   num_bins: 50  # H5: Histogram bins for entropy
-  beta: 1.0  # H6: Scaling factor β for K
+  beta: 3.0  # H6: Scaling factor β for K ***
   pca_components: 32  # Dimensionality reduction
   k_min: 3  # Minimum keyframes
-  k_max: 50  # Maximum keyframes
+  k_max: 2500  # Maximum keyframes
   epsilon: 1.0e-10
 
 # DPP Kernel (H7, H8)
 dpp_kernel:
   sigma_f: null  # H7: Feature bandwidth (null = median heuristic)
-  sigma_t_ratio: 0.2  # H8: Temporal bandwidth as fraction of duration
+  sigma_t_ratio: 0.7  # H8: Temporal bandwidth as fraction of duration
   combine_method: hadamard  # Options: hadamard, additive
   use_gpu: true
 
@@ -106,8 +106,8 @@ selector:
 
 # Motion Awareness (H10)
 motion:
-  enabled: true  # Enable optical flow features
-  gamma: 0.1  # H10: Motion encoding weight γ
+  enabled: false  # Enable optical flow features
+  gamma: 0.8  # H10: Motion encoding weight γ
   method: farneback  # Options: farneback, raft
   flow_scale: 0.5  # Downscale for faster computation
 
