@@ -23,6 +23,9 @@ safetensors>=0.4.0
 # DPP sampling
 dppy>=0.3.2
 
+# GPU-accelerated K-means (optional, for selector.kmeans_use_gpu)
+torch-kmeans>=0.2.0
+
 # Progress bars and utilities
 tqdm>=4.66.0
 
@@ -33,6 +36,12 @@ pyyaml>=6.0
 pytest>=7.4.0
 pytest-cov>=4.1.0
 
+# Optional: for GPU video decoding (uncomment to enable)
+decord>=0.6.0
+
+# Optional: GPU HDBSCAN via RAPIDS (requires separate conda install)
+cuml  # Install via conda: conda install -c rapidsai cuml
+
 # Optional: for RAFT optical flow
 # torchvision handles this, but for standalone RAFT:
-# einops>=0.6.0
+einops>=0.6.0
