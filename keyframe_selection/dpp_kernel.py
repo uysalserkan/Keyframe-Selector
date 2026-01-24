@@ -270,11 +270,37 @@ class DPPKernelBuilder:
         Returns:
             Kernel matrix of shape (N, N).
         """
+        if self.config.use_gpu and HAS_TORCH and torch.cuda.is_available():
+            return self._build_temporal_kernel_gpu(timestamps, sigma_t)
+        
+        # CPU implementation
         t = timestamps.reshape(-1, 1)
         sq_distances = (t - t.T) ** 2
         kernel = np.exp(-sq_distances / (sigma_t ** 2))
         
         return kernel.astype(np.float64)
+    
+    def _build_temporal_kernel_gpu(
+        self,
+        timestamps: NDArray[np.float64],
+        sigma_t: float,
+    ) -> NDArray[np.float64]:
+        """
+        GPU-accelerated RBF temporal kernel using PyTorch.
+        
+        Args:
+            timestamps: Timestamp array of shape (N,).
+            sigma_t: Kernel bandwidth.
+        
+        Returns:
+            Kernel matrix of shape (N, N).
+        """
+        device = torch.device('cuda')
+        t = torch.from_numpy(timestamps).float().to(device).reshape(-1, 1)
+        sq_distances = (t - t.T) ** 2
+        kernel = torch.exp(-sq_distances / (sigma_t ** 2))
+        
+        return kernel.cpu().numpy().astype(np.float64)
     
     def _ensure_psd(
         self,

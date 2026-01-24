@@ -12,6 +12,13 @@ import numpy as np
 from numpy.typing import NDArray
 from sklearn.decomposition import PCA
 
+# Optional PyTorch for GPU acceleration
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+
 from .config import EntropyEstimatorConfig
 from .types import EmbeddingBatch, EntropyResult, TemporalAnalysisResult
 
@@ -162,6 +169,14 @@ class EntropyKEstimator:
         Returns:
             Reduced embeddings.
         """
+        # Try GPU acceleration if enabled
+        if self.config.use_gpu and HAS_TORCH and torch.cuda.is_available():
+            try:
+                return self._reduce_dimensionality_gpu(embeddings)
+            except Exception as e:
+                logger.warning(f"GPU PCA failed, falling back to sklearn: {e}")
+        
+        # CPU implementation with sklearn
         n_samples, n_features = embeddings.shape
         n_components = min(self.config.pca_components, n_samples, n_features)
         
@@ -172,11 +187,48 @@ class EntropyKEstimator:
         reduced = self._pca.fit_transform(embeddings)
         
         logger.debug(
-            f"PCA reduction: {n_features}D -> {n_components}D, "
+            f"PCA reduction (CPU): {n_features}D -> {n_components}D, "
             f"explained variance: {self._pca.explained_variance_ratio_.sum():.2%}"
         )
         
         return reduced.astype(np.float32)
+    
+    def _reduce_dimensionality_gpu(
+        self,
+        embeddings: NDArray[np.float32],
+    ) -> NDArray[np.float32]:
+        """
+        GPU-accelerated PCA using PyTorch SVD.
+        
+        Args:
+            embeddings: High-dimensional embeddings of shape (N, D).
+        
+        Returns:
+            Reduced embeddings of shape (N, n_components).
+        """
+        device = torch.device('cuda')
+        n_samples, n_features = embeddings.shape
+        n_components = min(self.config.pca_components, n_samples, n_features)
+        
+        if n_components < 1:
+            return embeddings
+        
+        # Convert to tensor and center
+        X = torch.from_numpy(embeddings).float().to(device)
+        X_mean = X.mean(dim=0)
+        X_centered = X - X_mean
+        
+        # SVD-based PCA
+        U, S, Vh = torch.linalg.svd(X_centered, full_matrices=False)
+        
+        # Project to reduced space
+        reduced = U[:, :n_components] * S[:n_components]
+        
+        logger.debug(
+            f"PCA reduction (GPU): {n_features}D -> {n_components}D"
+        )
+        
+        return reduced.cpu().numpy().astype(np.float32)
     
     def _compute_entropy(
         self,

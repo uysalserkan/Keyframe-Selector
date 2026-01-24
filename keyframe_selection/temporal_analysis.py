@@ -11,6 +11,13 @@ from typing import Optional, Tuple
 import numpy as np
 from numpy.typing import NDArray
 
+# Optional PyTorch for GPU acceleration
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+
 from .config import TemporalAnalysisConfig
 from .types import EmbeddingBatch, TemporalAnalysisResult
 
@@ -136,13 +143,35 @@ class TemporalDeltaComputer:
         Returns:
             Delta array of shape (N-1,).
         """
-        # Compute differences
-        diffs = embeddings[1:] - embeddings[:-1]
+        # Try GPU acceleration if enabled
+        if self.config.use_gpu and HAS_TORCH and torch.cuda.is_available():
+            return self._compute_deltas_gpu(embeddings)
         
-        # L2 norm of differences
+        # CPU implementation
+        diffs = embeddings[1:] - embeddings[:-1]
         deltas = np.linalg.norm(diffs, axis=1)
         
         return deltas.astype(np.float64)
+    
+    def _compute_deltas_gpu(
+        self,
+        embeddings: NDArray[np.float32],
+    ) -> NDArray[np.float64]:
+        """
+        GPU-accelerated L2 delta computation using PyTorch.
+        
+        Args:
+            embeddings: Embedding array of shape (N, D).
+        
+        Returns:
+            Delta array of shape (N-1,).
+        """
+        device = torch.device('cuda')
+        X = torch.from_numpy(embeddings).float().to(device)
+        diffs = X[1:] - X[:-1]
+        deltas = torch.linalg.norm(diffs, dim=1)
+        
+        return deltas.cpu().numpy().astype(np.float64)
     
     def _apply_ema(
         self,

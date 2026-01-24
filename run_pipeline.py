@@ -277,6 +277,13 @@ Examples:
     # Other options
     other_group = parser.add_argument_group("Other")
     other_group.add_argument(
+        "--device",
+        type=str,
+        choices=["cuda", "cpu", "auto"],
+        default="auto",
+        help="Device for GPU operations (auto=detect, cuda=force GPU, cpu=force CPU) (default: auto)",
+    )
+    other_group.add_argument(
         "--seed",
         type=int,
         default=42,
@@ -315,6 +322,14 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
     
     config.output_dir = Path(args.output)
     config.save_intermediate = args.save_intermediate
+    
+    # Global device setting
+    if args.device != "auto":
+        device = "cuda" if args.device == "cuda" else "cpu"
+        config.device = device
+        # Propagate to all encoders and GPU-accelerated components
+        config.clip_encoder.device = device
+        config.dinov3_encoder.device = device
     
     # Frame sampling
     config.frame_sampling.fps = args.fps

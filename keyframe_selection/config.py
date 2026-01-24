@@ -95,6 +95,9 @@ class TemporalAnalysisConfig:
     
     # Minimum gap between detected change points
     min_segment_frames: int = 3
+    
+    # GPU acceleration for delta computation
+    use_gpu: bool = True
 
 
 @dataclass
@@ -116,6 +119,9 @@ class EntropyEstimatorConfig:
     
     # Numerical stability
     epsilon: float = 1e-10
+    
+    # GPU acceleration for PCA computation
+    use_gpu: bool = True
 
 
 @dataclass
@@ -175,6 +181,9 @@ class SelectorConfig:
     # Maximum number of iterations for K-means
     kmeans_max_iter: int = 300
     
+    # GPU acceleration for K-means
+    kmeans_use_gpu: bool = True
+    
     # === HDBSCAN specific parameters ===
     # Minimum number of samples in a neighborhood for a point to be considered as a core point
     hdbscan_min_cluster_size: int = 2
@@ -188,6 +197,9 @@ class SelectorConfig:
     
     # Method used to select clusters from the cluster hierarchy
     hdbscan_cluster_selection_method: Literal["eom", "leaf"] = "eom"
+    
+    # GPU acceleration for DPP greedy MAP
+    dpp_use_gpu: bool = True
 
 
 @dataclass
@@ -221,6 +233,10 @@ class PipelineConfig:
     
     # Encoder backend selection
     encoder_backend: Literal["clip", "dinov3"] = "clip"
+    
+    # Global device setting (overrides individual component settings)
+    # None = auto-detect, "cuda" = GPU, "cpu" = CPU
+    device: Optional[str] = None
     
     # Stage configurations
     frame_sampling: FrameSamplingConfig = field(default_factory=FrameSamplingConfig)
