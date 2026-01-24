@@ -49,6 +49,7 @@ temporal_analysis:
   use_ema_smoothing: false  # Smooth noisy deltas
   ema_alpha: 0.3
   min_segment_frames: 3  # Minimum gap between change points
+  use_gpu: true  # GPU acceleration for temporal gradient computation
 
 # Entropy-based K Estimation (H5, H6)
 entropy_estimator:
@@ -58,6 +59,7 @@ entropy_estimator:
   k_min: 3  # Minimum keyframes
   k_max: 50  # Maximum keyframes
   epsilon: 1.0e-10
+  use_gpu: true  # GPU acceleration for PCA dimensionality reduction
 
 # DPP Kernel (H7, H8)
 dpp_kernel:
@@ -82,12 +84,16 @@ selector:
   kmeans_init: k-means++  # Options: k-means++, random
   kmeans_n_init: 10
   kmeans_max_iter: 300
+  kmeans_use_gpu: true  # GPU acceleration for K-means clustering
   
   # HDBSCAN specific (only used when method: hdbscan)
   hdbscan_min_cluster_size: 2
   hdbscan_min_samples: null  # null = same as min_cluster_size
   hdbscan_cluster_selection_epsilon: 0.0
   hdbscan_cluster_selection_method: eom  # Options: eom, leaf
+  
+  # DPP GPU acceleration
+  dpp_use_gpu: true  # GPU acceleration for DPP greedy MAP inference
 
 # Motion Awareness (H10)
 motion:
