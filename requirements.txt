@@ -40,7 +40,7 @@ pytest-cov>=4.1.0
 decord>=0.6.0
 
 # Optional: GPU HDBSCAN via RAPIDS (requires separate conda install)
-cuml  # Install via conda: conda install -c rapidsai cuml
+# cuml  # Install via conda: conda install -c rapidsai cuml
 
 # Optional: for RAFT optical flow
 # torchvision handles this, but for standalone RAFT:
