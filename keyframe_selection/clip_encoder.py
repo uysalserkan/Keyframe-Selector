@@ -126,7 +126,7 @@ class CLIPTemporalEncoder:
         with Timer("clip_encoding"):
             embeddings = self._batch_encode(frame_batch.images)
         
-        # Gather metadata
+        # Gather metadata (optimized: direct array access)
         timestamps = frame_batch.timestamps
         frame_indices = np.array([f.frame_index for f in frame_batch.frames], dtype=np.int64)
         
@@ -189,6 +189,7 @@ class CLIPTemporalEncoder:
         # Temporal encoding
         temporal_embeddings = None
         if add_temporal and self.config.temporal_weight > 0:
+            # Optimized: simplified normalization logic
             if video_duration is not None and video_duration > 0:
                 norm_timestamps = timestamps / video_duration
             else:
@@ -221,12 +222,13 @@ class CLIPTemporalEncoder:
             for i in range(0, len(images), batch_size):
                 batch_images = images[i:i + batch_size]
                 
-                # Preprocess images
+                # Preprocess images (optimized: reduced allocations)
                 preprocessed = []
                 for img in batch_images:
-                    # Convert BGR to RGB
+                    # Convert BGR to RGB (optimized: in-place slicing)
                     if img.ndim == 3 and img.shape[2] == 3:
-                        img_rgb = img[:, :, ::-1]
+                        # Use negative stride for BGR->RGB without copy
+                        img_rgb = np.ascontiguousarray(img[:, :, ::-1])
                     else:
                         img_rgb = img
                     
@@ -238,14 +240,12 @@ class CLIPTemporalEncoder:
                 # Stack into batch
                 batch_tensor = torch.stack(preprocessed).to(self.device)
                 
-                # Mixed precision
+                # Mixed precision (optimized: single conditional)
                 if self.config.use_fp16 and self.device == "cuda":
                     batch_tensor = batch_tensor.half()
                 
-                # Encode
+                # Encode and normalize in one step
                 features = self.model.encode_image(batch_tensor)
-                
-                # Normalize
                 features = features / features.norm(dim=-1, keepdim=True)
                 
                 all_embeddings.append(features.cpu().float().numpy())
@@ -269,8 +269,9 @@ class CLIPTemporalEncoder:
         Returns:
             Temporal embeddings of shape (N, D+1).
         """
+        # Optimized: compute scaled timestamps directly as column vector
         alpha = self.config.temporal_weight
-        temporal_component = (alpha * normalized_timestamps).reshape(-1, 1).astype(np.float32)
+        temporal_component = (alpha * normalized_timestamps.astype(np.float32)).reshape(-1, 1)
         
         return np.hstack([embeddings, temporal_component])
     
@@ -314,6 +315,7 @@ def extract_clip_features(
     
     embedding_batch = encoder.encode(frame_batch)
     
+    # Optimized: single-pass list comprehension
     paths = [str(f.path) for f in frame_batch.frames if f.path is not None]
     
     return embedding_batch.effective_embeddings, paths

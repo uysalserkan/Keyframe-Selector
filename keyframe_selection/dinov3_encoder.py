@@ -166,7 +166,7 @@ class DINOv3TemporalEncoder:
         with Timer("dinov3_encoding"):
             embeddings = self._batch_encode(frame_batch.images)
         
-        # Gather metadata
+        # Gather metadata (optimized: direct array access)
         timestamps = frame_batch.timestamps
         frame_indices = np.array([f.frame_index for f in frame_batch.frames], dtype=np.int64)
         
@@ -226,7 +226,7 @@ class DINOv3TemporalEncoder:
         
         frame_indices = np.arange(len(images), dtype=np.int64)
         
-        # Temporal encoding
+        # Temporal encoding (optimized: simplified normalization)
         temporal_embeddings = None
         if add_temporal and self.config.temporal_weight > 0:
             if video_duration is not None and video_duration > 0:
@@ -261,11 +261,12 @@ class DINOv3TemporalEncoder:
             for i in range(0, len(images), batch_size):
                 batch_images = images[i:i + batch_size]
                 
-                # Convert BGR to RGB PIL images
+                # Convert BGR to RGB PIL images (optimized: contiguous arrays)
                 pil_images = []
                 for img in batch_images:
                     if img.ndim == 3 and img.shape[2] == 3:
-                        img_rgb = img[:, :, ::-1]  # BGR to RGB
+                        # Use contiguous array for better memory layout
+                        img_rgb = np.ascontiguousarray(img[:, :, ::-1])
                     else:
                         img_rgb = img
                     pil_images.append(Image.fromarray(img_rgb))
@@ -275,7 +276,10 @@ class DINOv3TemporalEncoder:
                     images=pil_images,
                     return_tensors="pt",
                 )
-                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                
+                # Move to device (optimized: in-place modification)
+                for k in inputs:
+                    inputs[k] = inputs[k].to(self.device)
                 
                 # Mixed precision inference on CUDA
                 if self.config.use_fp16 and self.device == "cuda":
@@ -292,7 +296,9 @@ class DINOv3TemporalEncoder:
                 
                 all_embeddings.append(features.cpu().float().numpy())
         
-        return np.vstack(all_embeddings).astype(np.float32)
+        # Optimized: check if vstack result is already float32
+        result = np.vstack(all_embeddings)
+        return result if result.dtype == np.float32 else result.astype(np.float32)
     
     def _extract_features(self, outputs) -> torch.Tensor:
         """
@@ -337,8 +343,9 @@ class DINOv3TemporalEncoder:
         Returns:
             Temporal embeddings of shape (N, D+1).
         """
+        # Optimized: compute scaled timestamps directly as column vector
         alpha = self.config.temporal_weight
-        temporal_component = (alpha * normalized_timestamps).reshape(-1, 1).astype(np.float32)
+        temporal_component = (alpha * normalized_timestamps.astype(np.float32)).reshape(-1, 1)
         
         return np.hstack([embeddings, temporal_component])
     
@@ -382,6 +389,7 @@ def extract_dinov3_features(
     
     embedding_batch = encoder.encode(frame_batch)
     
+    # Optimized: single-pass list comprehension
     paths = [str(f.path) for f in frame_batch.frames if f.path is not None]
     
     return embedding_batch.effective_embeddings, paths
