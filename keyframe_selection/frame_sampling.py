@@ -74,9 +74,8 @@ class FrameSampler:
                 f"Duration: {duration:.2f}s"
             )
             
-            # Calculate frame interval
-            frame_interval = int(source_fps / self.config.fps) if self.config.fps > 0 else 1
-            frame_interval = max(1, frame_interval)
+            # Calculate frame interval (pre-compute to avoid repeated operations)
+            frame_interval = max(1, int(source_fps / self.config.fps)) if self.config.fps > 0 else 1
             
             logger.info(
                 f"Sampling at {self.config.fps} FPS (every {frame_interval} frames)"
@@ -88,9 +87,10 @@ class FrameSampler:
                 output_dir.mkdir(parents=True, exist_ok=True)
             
             frames: List[FrameData] = []
-            prev_frame = None
+            prev_frame = None if self.config.adaptive else False  # False = disabled
             frame_idx = 0
             saved_idx = 0
+            inv_source_fps = 1.0 / source_fps if source_fps > 0 else 0.0  # Pre-compute
             
             with Timer("frame_sampling"):
                 while True:
@@ -101,8 +101,8 @@ class FrameSampler:
                     # Check if we should sample this frame
                     should_sample = False
                     
-                    if self.config.adaptive and prev_frame is not None:
-                        # Adaptive sampling: detect scene changes
+                    # Adaptive sampling: detect scene changes (only if enabled)
+                    if prev_frame is not False and prev_frame is not None:
                         change_score = self._compute_frame_difference(prev_frame, frame)
                         if change_score > self.config.adaptive_threshold:
                             should_sample = True
@@ -112,7 +112,7 @@ class FrameSampler:
                         should_sample = True
                     
                     if should_sample:
-                        timestamp = frame_idx / source_fps if source_fps > 0 else 0.0
+                        timestamp = frame_idx * inv_source_fps
                         
                         # Save to disk if requested
                         frame_path = None
@@ -128,7 +128,9 @@ class FrameSampler:
                         ))
                         saved_idx += 1
                     
-                    prev_frame = frame
+                    # Only store prev_frame if adaptive mode is enabled
+                    if prev_frame is not False:
+                        prev_frame = frame
                     frame_idx += 1
             
             logger.info(f"Extracted {len(frames)} frames")
@@ -164,10 +166,10 @@ class FrameSampler:
         
         try:
             source_fps = cap.get(cv2.CAP_PROP_FPS)
-            frame_interval = int(source_fps / self.config.fps) if self.config.fps > 0 else 1
-            frame_interval = max(1, frame_interval)
+            frame_interval = max(1, int(source_fps / self.config.fps)) if self.config.fps > 0 else 1
+            inv_source_fps = 1.0 / source_fps if source_fps > 0 else 0.0
             
-            prev_frame = None
+            prev_frame = None if self.config.adaptive else False
             frame_idx = 0
             
             while True:
@@ -177,7 +179,8 @@ class FrameSampler:
                 
                 should_sample = False
                 
-                if self.config.adaptive and prev_frame is not None:
+                # Only compute frame difference if adaptive mode is enabled
+                if prev_frame is not False and prev_frame is not None:
                     change_score = self._compute_frame_difference(prev_frame, frame)
                     if change_score > self.config.adaptive_threshold:
                         should_sample = True
@@ -186,14 +189,15 @@ class FrameSampler:
                     should_sample = True
                 
                 if should_sample:
-                    timestamp = frame_idx / source_fps if source_fps > 0 else 0.0
+                    timestamp = frame_idx * inv_source_fps
                     yield FrameData(
                         image=frame,
                         timestamp=timestamp,
                         frame_index=frame_idx,
                     )
                 
-                prev_frame = frame
+                if prev_frame is not False:
+                    prev_frame = frame
                 frame_idx += 1
         
         finally:
@@ -220,15 +224,14 @@ class FrameSampler:
         if not frame_dir.exists():
             raise FileNotFoundError(f"Frame directory not found: {frame_dir}")
         
-        # Find and sort frame files
-        frame_paths = sorted(frame_dir.glob(pattern))
+        # Find and sort frame files (optimized: single traversal with fallback)
+        extensions = [pattern, "*.png", "*.jpeg", "*.jpg", "*.bmp"]
+        frame_paths = []
         
-        if not frame_paths:
-            # Try other common extensions
-            for ext in ["*.png", "*.jpeg", "*.bmp"]:
-                frame_paths = sorted(frame_dir.glob(ext))
-                if frame_paths:
-                    break
+        for ext in extensions:
+            frame_paths = sorted(frame_dir.glob(ext))
+            if frame_paths:
+                break
         
         if not frame_paths:
             raise ValueError(f"No frames found in {frame_dir}")
@@ -236,6 +239,7 @@ class FrameSampler:
         logger.info(f"Loading {len(frame_paths)} frames from {frame_dir}")
         
         frames: List[FrameData] = []
+        inv_video_fps = 1.0 / video_fps if video_fps > 0 else 0.0
         
         with Timer("load_frames"):
             for idx, path in enumerate(frame_paths):
@@ -245,7 +249,7 @@ class FrameSampler:
                     logger.warning(f"Could not load: {path}")
                     continue
                 
-                timestamp = idx / video_fps
+                timestamp = idx * inv_video_fps
                 
                 frames.append(FrameData(
                     image=image,
@@ -284,13 +288,13 @@ class FrameSampler:
         gray1 = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
         gray2 = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
         
-        # Compute histograms
+        # Compute and normalize histograms in-place
         hist1 = cv2.calcHist([gray1], [0], None, [256], [0, 256])
         hist2 = cv2.calcHist([gray2], [0], None, [256], [0, 256])
         
-        # Normalize
-        cv2.normalize(hist1, hist1)
-        cv2.normalize(hist2, hist2)
+        # Normalize in-place (dst=src for in-place operation)
+        cv2.normalize(hist1, hist1, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
+        cv2.normalize(hist2, hist2, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
         
         # Compare histograms (higher = more different)
         diff = cv2.compareHist(hist1, hist2, cv2.HISTCMP_CHISQR)
