@@ -1,0 +1,284 @@
+# ============================================================================
+# Keyframe Selection Pipeline - GPU/CUDA Configuration Example
+# ============================================================================
+# This configuration file demonstrates GPU acceleration features.
+# Use: python run_pipeline.py --config config.example.gpu.yaml
+#
+# For minimal setup, see config.example.yaml
+# ============================================================================
+
+# Video input source (choose one)
+# video_path: "/path/to/video.mp4"
+frame_dir: "./frames"
+
+# Output directory for results
+output_dir: "./output"
+
+# Save intermediate results (embeddings, kernels, etc.)
+save_intermediate: false
+
+# ============================================================================
+# GLOBAL GPU/CUDA SETTINGS
+# ============================================================================
+# Controls device placement for all GPU-accelerated components
+# Options: None (auto-detect), "cuda" (force GPU), "cpu" (force CPU)
+device: "cuda"
+
+# ============================================================================
+# ENCODER CONFIGURATION
+# ============================================================================
+# Choose encoder backend: "clip" or "dinov3"
+encoder_backend: "clip"
+
+# CLIP Encoder Settings
+# ============================================================================
+clip_encoder:
+  # CLIP model variant: ViT-B/32, ViT-B/16, ViT-L/14, ViT-L/14@336px
+  model_name: "ViT-L/14"
+  
+  # Temporal encoding weight (H4): scales temporal position component
+  temporal_weight: 0.1
+  
+  # Batch size for encoding (increase for GPU, decrease for CPU/memory constraints)
+  batch_size: 32
+  
+  # Use FP16 mixed precision for faster GPU inference
+  use_fp16: true
+  
+  # Device for CLIP: "cuda", "cpu", or None (uses global device)
+  device: "cuda"
+
+# DINOv3 Encoder Settings (alternative to CLIP)
+# ============================================================================
+# Uncomment to use DINOv3 instead of CLIP
+# encoder_backend: "dinov3"
+dinov3_encoder:
+  # Hugging Face model ID
+  # Options: facebook/dinov2-small, facebook/dinov2-base, 
+  #          facebook/dinov2-large, facebook/dinov2-giant
+  model_id: "facebook/dinov2-base"
+  
+  # Model revision for reproducibility (latest if None)
+  revision: null
+  
+  # Temporal encoding weight (H4)
+  temporal_weight: 0.1
+  
+  # Pooling strategy: "cls" (CLS token) or "mean" (patch mean)
+  pooling: "cls"
+  
+  # Batch size for GPU acceleration
+  batch_size: 32
+  
+  # Use FP16 mixed precision on CUDA
+  use_fp16: true
+  
+  # Device for DINOv3: "cuda", "cpu", or None (uses global device)
+  device: "cuda"
+
+# ============================================================================
+# FRAME SAMPLING CONFIGURATION
+# ============================================================================
+frame_sampling:
+  # Frames per second to sample (H2)
+  fps: 1.0
+  
+  # Adaptive scene-based sampling
+  adaptive: false
+  
+  # Scene change threshold for adaptive sampling
+  adaptive_threshold: 30.0
+  
+  # Output format: jpg, png
+  output_format: "jpg"
+  
+  # JPEG quality (0-100)
+  jpeg_quality: 95
+
+# ============================================================================
+# MOTION ENCODING CONFIGURATION (Optional)
+# ============================================================================
+motion:
+  # Enable motion feature extraction
+  enabled: false
+  
+  # Motion encoding weight (H10)
+  gamma: 0.1
+  
+  # Flow computation method: "farneback" (CPU) or "raft" (GPU)
+  # Use "raft" for GPU acceleration
+  method: "farneback"
+  
+  # Downscale factor for flow computation (0.0-1.0)
+  flow_scale: 0.5
+
+# ============================================================================
+# TEMPORAL ANALYSIS CONFIGURATION
+# ============================================================================
+temporal_analysis:
+  # Percentile threshold for significant changes (H3)
+  delta_percentile: 90.0
+  
+  # Enable EMA smoothing for noisy videos
+  use_ema_smoothing: false
+  
+  # EMA decay factor (0.0-1.0, higher = less smoothing)
+  ema_alpha: 0.3
+  
+  # Minimum gap between detected change points (frames)
+  min_segment_frames: 3
+  
+  # ✨ GPU ACCELERATION OPTION
+  # Use PyTorch CUDA for L2 distance computation
+  use_gpu: true
+
+# ============================================================================
+# ENTROPY ESTIMATION CONFIGURATION
+# ============================================================================
+entropy_estimator:
+  # Number of histogram bins for entropy calculation (H5)
+  num_bins: 50
+  
+  # Scaling factor for keyframe count (H6)
+  beta: 1.0
+  
+  # PCA dimensionality reduction target
+  pca_components: 32
+  
+  # Bounds for adaptive K
+  k_min: 3
+  k_max: 50
+  
+  # Numerical stability epsilon
+  epsilon: 1.0e-10
+  
+  # ✨ GPU ACCELERATION OPTION
+  # Use PyTorch SVD for GPU-accelerated PCA
+  use_gpu: true
+
+# ============================================================================
+# DPP KERNEL CONFIGURATION
+# ============================================================================
+dpp_kernel:
+  # Feature kernel bandwidth (H7): None = use median heuristic
+  sigma_f: null
+  
+  # Temporal kernel bandwidth as fraction of video length (H8)
+  sigma_t_ratio: 0.2
+  
+  # Kernel combination method: "hadamard" or "additive"
+  combine_method: "hadamard"
+  
+  # ✨ GPU ACCELERATION OPTION
+  # Use GPU for kernel computation (both feature and temporal)
+  use_gpu: true
+
+# ============================================================================
+# KEYFRAME SELECTION CONFIGURATION
+# ============================================================================
+selector:
+  # Selection method: "dpp" (default), "kmeans", or "hdbscan"
+  method: "dpp"
+  
+  # ========== DPP-Specific Parameters ==========
+  # DPP sampling mode: "sample" (stochastic) or "map" (deterministic)
+  mode: "sample"
+  
+  # ========== Common Parameters ==========
+  # Fixed number of keyframes (None = use adaptive K)
+  # Overrides entropy-based K estimation
+  fixed_k: null
+  
+  # Random seed for reproducibility
+  seed: 42
+  
+  # Number of DPP samples for stochastic mode
+  num_samples: 1
+  
+  # Minimum gap between selected frames (prevents temporal clustering)
+  # Set to 0 to disable
+  min_frame_gap: 5
+  
+  # Include detected change points in DPP selection
+  include_change_points: true
+  
+  # ✨ GPU ACCELERATION OPTION
+  # Use GPU for DPP greedy MAP selection
+  dpp_use_gpu: true
+  
+  # ========== K-means Parameters ==========
+  # Initialization method: "k-means++" or "random"
+  kmeans_init: "k-means++"
+  
+  # Number of K-means initializations
+  kmeans_n_init: 10
+  
+  # Maximum K-means iterations
+  kmeans_max_iter: 300
+  
+  # ✨ GPU ACCELERATION OPTION
+  # Use torch-kmeans for GPU-accelerated K-means
+  kmeans_use_gpu: true
+  
+  # ========== HDBSCAN Parameters ==========
+  # Minimum cluster size for HDBSCAN
+  hdbscan_min_cluster_size: 2
+  
+  # Minimum samples (None = same as min_cluster_size)
+  hdbscan_min_samples: null
+  
+  # Cluster selection epsilon
+  hdbscan_cluster_selection_epsilon: 0.0
+  
+  # Cluster selection method: "eom" or "leaf"
+  hdbscan_cluster_selection_method: "eom"
+
+# ============================================================================
+# PIPELINE CONTROL SETTINGS
+# ============================================================================
+# Ablation toggles for ablation studies
+use_temporal_encoding: true
+use_entropy_k: true
+use_temporal_kernel: true
+
+# Global random seed
+random_seed: 42
+
+# Verbose logging
+verbose: true
+
+# ============================================================================
+# USAGE EXAMPLES
+# ============================================================================
+# 
+# 1. Run with this config:
+#    python run_pipeline.py --config config.example.gpu.yaml
+#
+# 2. Override config with CLI flags:
+#    python run_pipeline.py --config config.example.gpu.yaml --device cpu --frames ./frames
+#
+# 3. Key GPU-related flags:
+#    --device {cuda,cpu,auto}   # Device selection
+#    --verbose                   # See GPU paths used
+#
+# ============================================================================
+# CONFIGURATION VARIANTS
+# ============================================================================
+#
+# HIGH-PERFORMANCE GPU MODE:
+#   - device: "cuda"
+#   - clip_encoder.batch_size: 64  (increase batch)
+#   - All use_gpu: true
+#   - motion.method: "raft"  (GPU optical flow)
+#
+# CPU-SAFE MODE (works everywhere):
+#   - device: "cpu"
+#   - clip_encoder.batch_size: 16  (smaller batch)
+#   - All use_gpu: false
+#   - motion.method: "farneback"
+#
+# AUTO-DETECT MODE (recommended):
+#   - device: null  (auto-detect)
+#   - All use_gpu: true  (GPU if available, CPU fallback)
+#
+# ============================================================================

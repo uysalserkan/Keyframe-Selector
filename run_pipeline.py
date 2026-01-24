@@ -327,9 +327,17 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
     if args.device != "auto":
         device = "cuda" if args.device == "cuda" else "cpu"
         config.device = device
-        # Propagate to all encoders and GPU-accelerated components
+        # Propagate to all encoders
         config.clip_encoder.device = device
         config.dinov3_encoder.device = device
+        
+        # Disable all GPU acceleration flags when forcing CPU
+        if device == "cpu":
+            config.temporal_analysis.use_gpu = False
+            config.entropy_estimator.use_gpu = False
+            config.dpp_kernel.use_gpu = False
+            config.selector.kmeans_use_gpu = False
+            config.selector.dpp_use_gpu = False
     
     # Frame sampling
     config.frame_sampling.fps = args.fps
