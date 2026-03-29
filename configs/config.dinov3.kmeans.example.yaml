@@ -1,14 +1,17 @@
-# Keyframe Selection Pipeline Configuration - DINOv3 Example
-# ===========================================================
-# This example uses Meta's DINOv2 model for embedding extraction.
-# DINOv2 provides strong self-supervised visual features.
+# Keyframe Selection Pipeline Configuration - DINOv3 + K-means
+# ==============================================================
+# This example uses Meta's DINOv2 model with K-means clustering.
+# K-means selects REPRESENTATIVE frames (medoids) - better for reconstruction.
+#
+# OPTIMIZED FOR: Reconstruction quality (PSNR/L1)
+# See PSNR_L1_ANALYSIS.md for detailed recommendations.
 
 # Input settings
-video_path: "/Users/serkan.uysal/Downloads/dji_mimo_20260103_144920_20260103144919_1767445135722_video.MP4"  # Path to video file (use this OR frame_dir)
-frame_dir: null  # Path to pre-extracted frames directory
+video_path: null  # Path to video file (use this OR frame_dir)
+frame_dir: ./frames  # Path to pre-extracted frames directory
 
 # Output settings
-output_dir: ./dji_output3
+output_dir: ./output_dinov3_kmeans
 save_intermediate: false  # Save embeddings, kernels for analysis
 
 # Encoder Backend Selection
@@ -64,15 +67,19 @@ temporal_analysis:
   use_ema_smoothing: false  # Smooth noisy deltas
   ema_alpha: 0.3
   min_segment_frames: 3  # Minimum gap between change points
+  use_gpu: true  # GPU acceleration for temporal gradient computation
 
 # Entropy-based K Estimation (H5, H6)
+# ISSUE: beta=1.0 and k_max=50 produce too few keyframes for good reconstruction
+# FIX: Increased parameters for better PSNR/L1 scores
 entropy_estimator:
   num_bins: 50  # H5: Histogram bins for entropy
-  beta: 1.0  # H6: Scaling factor β for K
+  beta: 2.5  # H6: Scaling factor β for K (was 1.0)
   pca_components: 32  # Dimensionality reduction
-  k_min: 3  # Minimum keyframes
-  k_max: 50  # Maximum keyframes
+  k_min: 10  # Minimum keyframes (was 3)
+  k_max: 300  # Maximum keyframes (was 50)
   epsilon: 1.0e-10
+  use_gpu: true  # GPU acceleration for PCA dimensionality reduction
 
 # DPP Kernel (H7, H8)
 dpp_kernel:
@@ -82,27 +89,33 @@ dpp_kernel:
   use_gpu: true
 
 # Selector (H9)
+# K-means selects the frame closest to each cluster center (medoid)
+# This is better for reconstruction than DPP's diversity optimization
 selector:
   method: kmeans  # Options: dpp, kmeans, hdbscan
   
   # DPP-specific (only used when method: dpp)
-  mode: sample  # H9: DPP mode (sample = stochastic, map = greedy)
+  mode: map  # H9: DPP mode (was sample, map is deterministic)
   fixed_k: null  # Override adaptive K (null = use entropy-based)
   seed: 42
   num_samples: 1
-  min_frame_gap: 5
+  min_frame_gap: 3  # was 5, allow closer keyframes for better reconstruction
   include_change_points: true
   
   # K-means specific (only used when method: kmeans)
   kmeans_init: k-means++  # Options: k-means++, random
   kmeans_n_init: 10
   kmeans_max_iter: 300
+  kmeans_use_gpu: true  # GPU acceleration for K-means clustering
   
   # HDBSCAN specific (only used when method: hdbscan)
   hdbscan_min_cluster_size: 2
   hdbscan_min_samples: null  # null = same as min_cluster_size
   hdbscan_cluster_selection_epsilon: 0.0
   hdbscan_cluster_selection_method: eom  # Options: eom, leaf
+  
+  # DPP GPU acceleration
+  dpp_use_gpu: true  # GPU acceleration for DPP greedy MAP inference
 
 # Motion Awareness (H10)
 motion:

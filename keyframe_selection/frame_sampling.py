@@ -225,7 +225,7 @@ class FrameSampler:
             raise FileNotFoundError(f"Frame directory not found: {frame_dir}")
         
         # Find and sort frame files (optimized: single traversal with fallback)
-        extensions = [pattern, "*.png", "*.jpeg", "*.jpg", "*.bmp"]
+        extensions = [pattern, "*.png", "*.PNG", "*.jpeg", "*.JPEG", "*.jpg", "*.JPG", "*.bmp"]
         frame_paths = []
         
         for ext in extensions:

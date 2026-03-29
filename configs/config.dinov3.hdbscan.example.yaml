@@ -1,14 +1,17 @@
-# Keyframe Selection Pipeline Configuration - DINOv3 Example
-# ===========================================================
-# This example uses Meta's DINOv2 model for embedding extraction.
-# DINOv2 provides strong self-supervised visual features.
+# Keyframe Selection Pipeline Configuration - DINOv3 + HDBSCAN
+# ==============================================================
+# This example uses Meta's DINOv2 model with HDBSCAN density-based clustering.
+# HDBSCAN automatically determines the number of clusters.
+#
+# OPTIMIZED FOR: Maximum keyframe extraction (aggressive settings)
+# See PSNR_L1_ANALYSIS.md for detailed recommendations.
 
 # Input settings
-video_path: "/Users/serkan.uysal/Downloads/dji_mimo_20260103_144920_20260103144919_1767445135722_video.MP4"  # Path to video file (use this OR frame_dir)
-frame_dir: null # /Users/serkan.uysal/Documents/keyframe-selection-with-clip/dji_output1/frames  # Path to pre-extracted frames directory
+video_path: "/Users/serkan.uysal/Downloads/3d-spin-videos/rose.mp4"   # Path to video file (use this OR frame_dir)
+frame_dir: null # Path to pre-extracted frames directory
 
 # Output settings
-output_dir: ./dji_output_15fps
+output_dir: ./output_dinov3_rose_10fps_hdbscan
 save_intermediate: false  # Save embeddings, kernels for analysis
 
 # Encoder Backend Selection
@@ -17,9 +20,9 @@ encoder_backend: dinov3
 
 # Frame Sampling (H2)
 frame_sampling:
-  fps: 15.0  # Frames per second to sample
+  fps: 10.0  # Frames per second to sample
   adaptive: true  # Enable scene-change based sampling
-  adaptive_threshold: 10.0
+  adaptive_threshold: 25.0  # was 10.0 (too sensitive, triggers on noise)
   output_format: jpg
   jpeg_quality: 95
 
@@ -37,7 +40,9 @@ dinov3_encoder:
   revision: null
   
   # H4: Temporal encoding weight α
-  temporal_weight: 0.1
+  # NOTE: was 50.0 which is WAY too high - should be 0.1-0.3
+  # High temporal_weight overwhelms semantic features
+  temporal_weight: 0.2
   
   # Pooling strategy for feature extraction
   # Options:
@@ -59,20 +64,26 @@ clip_encoder:
   device: null
 
 # Temporal Analysis (H3)
+# NOTE: delta_percentile=10 was too low (marks almost everything as change)
 temporal_analysis:
-  delta_percentile: 50.0  # H3: Percentile for change threshold τΔ
+  delta_percentile: 75.0  # H3: Percentile for change threshold τΔ (was 10, too aggressive)
   use_ema_smoothing: false  # Smooth noisy deltas
-  ema_alpha: 0.6
-  min_segment_frames: 3  # Minimum gap between change points
+  ema_alpha: 0.3
+  min_segment_frames: 2  # Minimum gap between change points (was 1)
+  use_gpu: true  # GPU acceleration for temporal gradient computation
 
 # Entropy-based K Estimation (H5, H6)
+# NOTE: HDBSCAN ignores K estimation (auto-determines clusters)
+# These are kept for reference if switching to kmeans/dpp
+# Original values (beta=25, k_max=2500) were extremely aggressive
 entropy_estimator:
-  num_bins: 50  # H5: Histogram bins for entropy
-  beta: 3.0  # H6: Scaling factor β for K ***
-  pca_components: 32  # Dimensionality reduction
-  k_min: 3  # Minimum keyframes
-  k_max: 2500  # Maximum keyframes
+  num_bins: 100  # H5: Histogram bins for entropy (was 250)
+  beta: 3.0  # H6: Scaling factor β for K (was 25, too extreme)
+  pca_components: 32  # Dimensionality reduction (was 64)
+  k_min: 10  # Minimum keyframes (was 3)
+  k_max: 500  # Maximum keyframes (was 2500)
   epsilon: 1.0e-10
+  use_gpu: true  # GPU acceleration for PCA dimensionality reduction
 
 # DPP Kernel (H7, H8)
 dpp_kernel:
@@ -82,32 +93,39 @@ dpp_kernel:
   use_gpu: true
 
 # Selector (H9)
+# HDBSCAN auto-determines clusters based on density
 selector:
   method: hdbscan  # Options: dpp, kmeans, hdbscan
   
   # DPP-specific (only used when method: dpp)
-  mode: sample  # H9: DPP mode (sample = stochastic, map = greedy)
+  mode: map  # H9: DPP mode (was sample)
   fixed_k: null  # Override adaptive K (null = use entropy-based)
   seed: 42
   num_samples: 1
-  min_frame_gap: 5
+  min_frame_gap: 2  # was 5, allow closer keyframes
   include_change_points: true
   
   # K-means specific (only used when method: kmeans)
   kmeans_init: k-means++  # Options: k-means++, random
   kmeans_n_init: 10
   kmeans_max_iter: 300
+  kmeans_use_gpu: true  # GPU acceleration for K-means clustering
   
   # HDBSCAN specific (only used when method: hdbscan)
+  # Lower min_cluster_size = more clusters = more keyframes
   hdbscan_min_cluster_size: 2
-  hdbscan_min_samples: null  # null = same as min_cluster_size
+  hdbscan_min_samples: 1  # was null, smaller = more keyframes
   hdbscan_cluster_selection_epsilon: 0.0
-  hdbscan_cluster_selection_method: eom  # Options: eom, leaf
+  hdbscan_cluster_selection_method: leaf  # was eom, leaf gives more clusters
+  
+  # DPP GPU acceleration
+  dpp_use_gpu: true  # GPU acceleration for DPP greedy MAP inference
 
 # Motion Awareness (H10)
+# NOTE: gamma=15 was WAY too high - motion features would dominate
 motion:
-  enabled: false  # Enable optical flow features
-  gamma: 0.8  # H10: Motion encoding weight γ
+  enabled: true  # Enable optical flow features
+  gamma: 0.15  # H10: Motion encoding weight γ (was 15, should be 0.1-0.3)
   method: farneback  # Options: farneback, raft
   flow_scale: 0.5  # Downscale for faster computation
 

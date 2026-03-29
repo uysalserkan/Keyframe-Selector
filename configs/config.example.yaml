@@ -2,6 +2,10 @@
 # ==========================================
 # This file documents all available hyperparameters (H1-H10)
 # Copy this file and modify as needed for your experiments.
+#
+# IMPORTANT: Default values are optimized for RECONSTRUCTION QUALITY (PSNR/L1).
+# For video summarization (diversity), use lower beta, k_max, and method: dpp.
+# See PSNR_L1_ANALYSIS.md for detailed recommendations.
 
 # Input settings
 video_path: null  # Path to video file (use this OR frame_dir)
@@ -16,8 +20,9 @@ save_intermediate: false  # Save embeddings, kernels for analysis
 encoder_backend: clip
 
 # Frame Sampling (H2)
+# NOTE: fps=1.0 is too sparse for good reconstruction. Use 2.0-5.0 for better PSNR.
 frame_sampling:
-  fps: 1.0  # Frames per second to sample
+  fps: 2.0  # Frames per second to sample (CHANGED: was 1.0, too sparse)
   adaptive: false  # Enable scene-change based sampling
   adaptive_threshold: 30.0
   output_format: jpg
@@ -52,12 +57,15 @@ temporal_analysis:
   use_gpu: true  # GPU acceleration for temporal gradient computation
 
 # Entropy-based K Estimation (H5, H6)
+# NOTE: Original defaults (beta=1.0, k_max=50) produce too few keyframes for reconstruction.
+# Formula: K = beta * sqrt(N) * entropy * (1 + mean_delta)
+# For N=600, entropy=0.5: beta=1.0 gives K~15, beta=2.5 gives K~37
 entropy_estimator:
   num_bins: 50  # H5: Histogram bins for entropy
-  beta: 1.0  # H6: Scaling factor β for K
+  beta: 2.5  # H6: Scaling factor β for K (CHANGED: was 1.0, too conservative)
   pca_components: 32  # Dimensionality reduction
-  k_min: 3  # Minimum keyframes
-  k_max: 50  # Maximum keyframes
+  k_min: 10  # Minimum keyframes (CHANGED: was 3, too few for reconstruction)
+  k_max: 300  # Maximum keyframes (CHANGED: was 50, too restrictive)
   epsilon: 1.0e-10
   use_gpu: true  # GPU acceleration for PCA dimensionality reduction
 
@@ -69,15 +77,17 @@ dpp_kernel:
   use_gpu: true
 
 # Selector (H9)
+# NOTE: For reconstruction quality, kmeans is better than dpp.
+# DPP optimizes for DIVERSITY, kmeans selects REPRESENTATIVE frames (medoids).
 selector:
-  method: dpp  # Options: dpp, kmeans, hdbscan
+  method: kmeans  # Options: dpp, kmeans, hdbscan (CHANGED: was dpp, kmeans better for PSNR)
   
   # DPP-specific (only used when method: dpp)
-  mode: sample  # H9: DPP mode (sample = stochastic, map = greedy)
+  mode: map  # H9: DPP mode (CHANGED: was sample, map is deterministic/reproducible)
   fixed_k: null  # Override adaptive K (null = use entropy-based)
   seed: 42
   num_samples: 1
-  min_frame_gap: 5
+  min_frame_gap: 3  # (CHANGED: was 5, allow closer keyframes for reconstruction)
   include_change_points: true
   
   # K-means specific (only used when method: kmeans)

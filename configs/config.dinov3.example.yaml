@@ -2,13 +2,16 @@
 # ===========================================================
 # This example uses Meta's DINOv2 model for embedding extraction.
 # DINOv2 provides strong self-supervised visual features.
+#
+# OPTIMIZED FOR: Reconstruction quality (PSNR/L1)
+# See PSNR_L1_ANALYSIS.md for detailed recommendations.
 
 # Input settings
-video_path: "/Users/serkan.uysal/Downloads/dji_mimo_20260103_144920_20260103144919_1767445135722_video.MP4"  # Path to video file (use this OR frame_dir)
-frame_dir: null  # Path to pre-extracted frames directory
+video_path: "/Users/serkan.uysal/Downloads/3d-spin-videos/case.mp4"   # Path to video file (use this OR frame_dir)
+frame_dir: null # Path to pre-extracted frames directory
 
 # Output settings
-output_dir: ./dji_output2
+output_dir: ./output_dinov3_case_25fps
 save_intermediate: false  # Save embeddings, kernels for analysis
 
 # Encoder Backend Selection
@@ -17,7 +20,7 @@ encoder_backend: dinov3
 
 # Frame Sampling (H2)
 frame_sampling:
-  fps: 5.0  # Frames per second to sample
+  fps: 25.0  # Frames per second to sample
   adaptive: true  # Enable scene-change based sampling
   adaptive_threshold: 30.0
   output_format: jpg
@@ -31,7 +34,7 @@ dinov3_encoder:
   #   - facebook/dinov2-base   (768 dim, balanced)
   #   - facebook/dinov2-large  (1024 dim, higher quality)
   #   - facebook/dinov2-giant  (1536 dim, best quality, slowest)
-  model_id: "facebook/dinov2-base"
+  model_id: "facebook/dinov2-large"
   
   # Model revision for reproducibility (null = latest)
   revision: null
@@ -64,15 +67,19 @@ temporal_analysis:
   use_ema_smoothing: false  # Smooth noisy deltas
   ema_alpha: 0.3
   min_segment_frames: 3  # Minimum gap between change points
+  use_gpu: true  # GPU acceleration for temporal gradient computation
 
 # Entropy-based K Estimation (H5, H6)
+# ISSUE: beta=1.0 and k_max=50 produce too few keyframes for good reconstruction
+# FIX: Increased beta to 2.5, k_max to 300
 entropy_estimator:
   num_bins: 50  # H5: Histogram bins for entropy
-  beta: 1.0  # H6: Scaling factor β for K
+  beta: 2.5  # H6: Scaling factor β for K (was 1.0)
   pca_components: 32  # Dimensionality reduction
-  k_min: 3  # Minimum keyframes
-  k_max: 50  # Maximum keyframes
+  k_min: 10  # Minimum keyframes (was 3)
+  k_max: 300  # Maximum keyframes (was 50)
   epsilon: 1.0e-10
+  use_gpu: true  # GPU acceleration for PCA dimensionality reduction
 
 # DPP Kernel (H7, H8)
 dpp_kernel:
@@ -82,27 +89,33 @@ dpp_kernel:
   use_gpu: true
 
 # Selector (H9)
+# ISSUE: DPP optimizes for diversity, not reconstruction quality
+# FIX: Use kmeans (selects representative frames) and deterministic mode
 selector:
-  method: dpp  # Options: dpp, kmeans, hdbscan
+  method: kmeans  # Options: dpp, kmeans, hdbscan (was dpp)
   
   # DPP-specific (only used when method: dpp)
-  mode: sample  # H9: DPP mode (sample = stochastic, map = greedy)
+  mode: map  # H9: DPP mode (was sample - stochastic, now deterministic)
   fixed_k: null  # Override adaptive K (null = use entropy-based)
   seed: 42
   num_samples: 1
-  min_frame_gap: 5
+  min_frame_gap: 3  # was 5, allow closer keyframes
   include_change_points: true
   
   # K-means specific (only used when method: kmeans)
   kmeans_init: k-means++  # Options: k-means++, random
   kmeans_n_init: 10
   kmeans_max_iter: 300
+  kmeans_use_gpu: true  # GPU acceleration for K-means clustering
   
   # HDBSCAN specific (only used when method: hdbscan)
   hdbscan_min_cluster_size: 2
   hdbscan_min_samples: null  # null = same as min_cluster_size
   hdbscan_cluster_selection_epsilon: 0.0
   hdbscan_cluster_selection_method: eom  # Options: eom, leaf
+  
+  # DPP GPU acceleration
+  dpp_use_gpu: true  # GPU acceleration for DPP greedy MAP inference
 
 # Motion Awareness (H10)
 motion:

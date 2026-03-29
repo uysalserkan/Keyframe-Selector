@@ -198,14 +198,13 @@ class KeyframeSelectionPipeline:
         logger.info(f"Loaded {len(frame_batch)} frames")
         
         # Stage 2: Image encoding with temporal encoding (CLIP or DINOv3)
-        encoder_name = self.config.encoder_backend.upper()
         with Timer(f"2_{self.config.encoder_backend}_encoding", log=self.config.verbose) as t:
             embedding_batch = self.image_encoder.encode(
                 frame_batch,
                 add_temporal=self.config.use_temporal_encoding,
             )
         # Keep timing key as "clip_encoding" for backward compatibility
-        timing["clip_encoding"] = t.elapsed
+        timing[f"2_{self.config.encoder_backend}_encoding"] = t.elapsed
         
         # Stage 2b: Optional motion encoding
         if self.config.motion.enabled:
