@@ -1,0 +1,120 @@
+# Keyframe Selection Configuration - VIDEO SUMMARIZATION
+# =======================================================
+# This configuration is optimized for video summarization.
+# Use this for:
+#   - Creating video thumbnails
+#   - Video search indexing
+#   - Content preview generation
+#   - Any use case where DIVERSITY matters more than reconstruction
+#
+# Key differences from reconstruction config:
+#   - Uses DPP (diverse frames) instead of K-means
+#   - Lower beta (fewer, more distinctive keyframes)
+#   - Higher min_frame_gap (spread keyframes apart)
+#   - Lower FPS (faster processing)
+#
+# NOTE: This config will produce LOWER PSNR/L1 scores than reconstruction config
+# because it optimizes for diversity, not pixel representativeness.
+
+# Input settings
+video_path: null
+frame_dir: ./frames
+
+# Output settings
+output_dir: ./output_summarization
+save_intermediate: false
+
+# Encoder Backend Selection
+encoder_backend: clip  # CLIP is good for semantic understanding
+
+# Frame Sampling (H2)
+frame_sampling:
+  fps: 1.0  # 1 fps is sufficient for summarization
+  adaptive: true  # Capture scene changes
+  adaptive_threshold: 30.0
+  output_format: jpg
+  jpeg_quality: 95
+
+# CLIP Encoder Configuration
+clip_encoder:
+  model_name: "ViT-L/14"
+  temporal_weight: 0.1
+  batch_size: 32
+  use_fp16: true
+  device: null
+
+# DINOv3 Encoder (if using encoder_backend: dinov3)
+dinov3_encoder:
+  model_id: "facebook/dinov2-base"
+  revision: null
+  temporal_weight: 0.1
+  pooling: cls
+  batch_size: 32
+  use_fp16: true
+  device: null
+
+# Temporal Analysis (H3)
+temporal_analysis:
+  delta_percentile: 90.0
+  use_ema_smoothing: false
+  ema_alpha: 0.3
+  min_segment_frames: 3
+  use_gpu: true
+
+# Entropy-based K Estimation (H5, H6)
+# Lower beta = fewer keyframes (more concise summary)
+entropy_estimator:
+  num_bins: 50
+  beta: 1.0  # Lower beta for summarization
+  pca_components: 32
+  k_min: 5
+  k_max: 50  # Cap at 50 for manageable summaries
+  epsilon: 1.0e-10
+  use_gpu: true
+
+# DPP Kernel (H7, H8)
+dpp_kernel:
+  sigma_f: null
+  sigma_t_ratio: 0.2
+  combine_method: hadamard
+  use_gpu: true
+
+# Selector (H9)
+# DPP optimizes for DIVERSITY - good for summarization
+selector:
+  method: dpp  # DPP for diverse frames
+
+  mode: sample  # Stochastic for variety
+  fixed_k: null
+  seed: 42
+  num_samples: 1
+  min_frame_gap: 5  # Spread keyframes apart
+  include_change_points: true
+
+  kmeans_init: k-means++
+  kmeans_n_init: 10
+  kmeans_max_iter: 300
+  kmeans_use_gpu: true
+
+  hdbscan_min_cluster_size: 2
+  hdbscan_min_samples: null
+  hdbscan_cluster_selection_epsilon: 0.0
+  hdbscan_cluster_selection_method: eom
+
+  dpp_use_gpu: true
+
+# Motion Awareness (H10)
+motion:
+  enabled: false  # Not needed for summarization
+  gamma: 0.1
+  method: farneback
+  flow_scale: 0.5
+
+# Ablation Toggles
+use_temporal_encoding: true
+use_entropy_k: true
+use_temporal_kernel: true  # Use temporal kernel for spread
+
+# Global Settings
+random_seed: 42
+verbose: true

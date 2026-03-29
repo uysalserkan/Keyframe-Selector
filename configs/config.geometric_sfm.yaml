@@ -1,0 +1,108 @@
+# Keyframe selection — geometric diversity (SfM proxy)
+# ======================================================
+# Uses ORB + fundamental matrix inlier ratios on consecutive pairs, optional
+# fusion with semantic DPP, and/or sequential keyframe spacing by parallax proxy.
+#
+# Requires: OpenCV. For full pipeline run with pipeline_objective: geometric_sfm
+# (auto-enables pairwise geometry and geometry-aware K).
+
+video_path: null
+frame_dir: /Users/serkan.uysal/Downloads/stump/images_2
+output_dir: ./output_geometric_sfm_stump
+save_intermediate: false
+
+encoder_backend: dinov3
+
+frame_sampling:
+  fps: 15.0
+  adaptive: true
+  adaptive_threshold: 25.0
+  output_format: jpg
+  jpeg_quality: 95
+
+dinov3_encoder:
+  model_id: "facebook/dinov2-base"
+  revision: null
+  temporal_weight: 0.12
+  pooling: cls
+  batch_size: 32
+  use_fp16: true
+  device: null
+
+clip_encoder:
+  model_name: "ViT-L/14"
+  temporal_weight: 0.12
+  batch_size: 32
+  use_fp16: true
+  device: null
+
+temporal_analysis:
+  delta_percentile: 85.0
+  use_ema_smoothing: false
+  ema_alpha: 0.3
+  min_segment_frames: 2
+  use_gpu: true
+
+entropy_estimator:
+  num_bins: 50
+  beta: 2.0
+  pca_components: 32
+  k_min: 10
+  k_max: 200
+  epsilon: 1.0e-10
+  use_gpu: true
+  use_geometry_k: true
+  geometry_k_weight: 0.35
+
+dpp_kernel:
+  sigma_f: null
+  sigma_t_ratio: 0.25
+  combine_method: hadamard
+  use_gpu: true
+  feature_source: fused
+  alpha_semantic: 0.45
+  sigma_geometric: null
+
+selector:
+  method: dpp
+  mode: map
+  fixed_k: null
+  seed: 42
+  num_samples: 1
+  min_frame_gap: 3
+  include_change_points: true
+  kmeans_init: k-means++
+  kmeans_n_init: 10
+  kmeans_max_iter: 300
+  kmeans_use_gpu: true
+  kmeans_fuse_geometry_features: false
+  sequential_min_score: 0.12
+  sequential_max_span: 40
+  hdbscan_min_cluster_size: 2
+  hdbscan_min_samples: 1
+  hdbscan_cluster_selection_epsilon: 0.0
+  hdbscan_cluster_selection_method: leaf
+  dpp_use_gpu: true
+
+pairwise_geometry:
+  enabled: true
+  n_features: 500
+  ratio_test: 0.75
+  ransac_threshold: 1.0
+  ransac_confidence: 0.99
+  downscale: 0.5
+
+motion:
+  enabled: false
+  gamma: 0.1
+  method: farneback
+  flow_scale: 0.5
+
+use_temporal_encoding: true
+use_entropy_k: true
+use_temporal_kernel: true
+
+pipeline_objective: geometric_sfm
+
+random_seed: 42
+verbose: true

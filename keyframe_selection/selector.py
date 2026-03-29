@@ -155,6 +155,8 @@ class DPPSelector:
             result = self._select_kmeans(embedding_batch, k, change_points)
         elif self.config.method == "hdbscan":
             result = self._select_hdbscan(embedding_batch, change_points)
+        elif self.config.method == "sequential_geometric":
+            result = self._select_sequential_geometric(embedding_batch, k, change_points)
         else:
             raise ValueError(f"Unknown selection method: {self.config.method}")
         
@@ -509,6 +511,10 @@ class DPPSelector:
             raise ValueError("k must be specified either in call or config.fixed_k")
         
         embeddings = embedding_batch.effective_embeddings
+        if self.config.kmeans_fuse_geometry_features and embedding_batch.geometry_point_features is not None:
+            embeddings = np.hstack(
+                [embeddings, embedding_batch.geometry_point_features.astype(np.float32)]
+            )
         n = len(embeddings)
         k = min(k, n)
         
@@ -607,6 +613,10 @@ class DPPSelector:
             raise ValueError("k must be specified either in call or config.fixed_k")
         
         embeddings = embedding_batch.effective_embeddings
+        if self.config.kmeans_fuse_geometry_features and embedding_batch.geometry_point_features is not None:
+            embeddings = np.hstack(
+                [embeddings, embedding_batch.geometry_point_features.astype(np.float32)]
+            )
         n = len(embeddings)
         k = min(k, n)
         
@@ -765,6 +775,93 @@ class DPPSelector:
                 "n": n,
                 "n_clusters": n_clusters,
                 "n_noise": int(n_noise),
+            },
+        )
+    
+    def _select_sequential_geometric(
+        self,
+        embedding_batch: EmbeddingBatch,
+        k: Optional[int] = None,
+        change_points: Optional[NDArray[np.int64]] = None,
+    ) -> KeyframeResult:
+        """
+        Sequential keyframes: advance when consecutive geometry (bottleneck) crosses threshold.
+
+        Uses geometry_consecutive_scores from pairwise two-view estimation (parallax proxy).
+        """
+        scores = embedding_batch.geometry_consecutive_scores
+        if scores is None or len(scores) == 0:
+            raise ValueError(
+                "sequential_geometric requires embedding_batch.geometry_consecutive_scores"
+            )
+        n = len(embedding_batch)
+        if k is None:
+            k = self.config.fixed_k
+        if k is None:
+            raise ValueError("k must be set for sequential_geometric (entropy or fixed_k)")
+        k = int(min(k, n))
+        if k <= 0 or n == 0:
+            return KeyframeResult(
+                indices=np.array([], dtype=np.int64),
+                timestamps=np.array([], dtype=np.float64),
+                metadata={"method": "sequential_geometric", "k": 0, "n": n},
+            )
+        if n == 1:
+            idx = np.array([0], dtype=np.int64)
+            ts = embedding_batch.timestamps[:1] if len(embedding_batch.timestamps) else idx.astype(np.float64)
+            return KeyframeResult(
+                indices=idx,
+                timestamps=ts,
+                metadata={"method": "sequential_geometric", "k": 1, "n": 1},
+            )
+        
+        s = np.asarray(scores, dtype=np.float64)
+        thresh = self.config.sequential_min_score
+        max_span = max(1, self.config.sequential_max_span)
+        
+        indices_list: List[int] = [0]
+        last = 0
+        while len(indices_list) < k and last < n - 1:
+            target: Optional[int] = None
+            upper = min(last + max_span, n - 1)
+            for j in range(last + 1, upper + 1):
+                seg = s[last:j]
+                if len(seg) > 0 and float(np.min(seg)) >= thresh:
+                    target = j
+                    break
+            if target is None:
+                target = upper if upper > last else last + 1
+            if target <= last:
+                break
+            indices_list.append(target)
+            last = target
+        
+        # If budget not filled, spread remaining picks toward the end
+        while len(indices_list) < k and indices_list[-1] < n - 1:
+            nxt = min(indices_list[-1] + max_span, n - 1)
+            if nxt <= indices_list[-1]:
+                break
+            indices_list.append(nxt)
+        
+        selected_indices = np.array(sorted(set(indices_list)), dtype=np.int64)
+        # Trim to k if oversampled
+        if len(selected_indices) > k:
+            selected_indices = selected_indices[:k]
+        
+        if len(embedding_batch.timestamps) > 0:
+            selected_timestamps = embedding_batch.timestamps[selected_indices]
+        else:
+            selected_timestamps = selected_indices.astype(np.float64)
+        
+        return KeyframeResult(
+            indices=selected_indices,
+            timestamps=selected_timestamps,
+            metadata={
+                "method": "sequential_geometric",
+                "k": len(selected_indices),
+                "n": n,
+                "sequential_min_score": thresh,
+                "sequential_max_span": max_span,
             },
         )
 

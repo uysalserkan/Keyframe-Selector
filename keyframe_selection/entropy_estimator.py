@@ -73,6 +73,7 @@ class EntropyKEstimator:
             return EntropyResult(
                 entropy=0.0,
                 recommended_k=self.config.k_min,
+                mean_geometry_score=None,
             )
         
         # Reduce dimensionality with PCA
@@ -99,6 +100,18 @@ class EntropyKEstimator:
         delta_factor = 1.0 + mean_delta  # Ranges from ~1.1 to ~2.5
         k_raw = self.config.beta * np.sqrt(n_frames) * entropy * delta_factor
         
+        mean_geometry_score: Optional[float] = None
+        if (
+            self.config.use_geometry_k
+            and embedding_batch.geometry_consecutive_scores is not None
+            and len(embedding_batch.geometry_consecutive_scores) > 0
+        ):
+            g = embedding_batch.geometry_consecutive_scores.astype(np.float64)
+            mean_geometry_score = float(np.mean(g))
+            # Stronger two-view agreement along the chain -> slightly more keyframes (richer geometry)
+            boost = 1.0 + self.config.geometry_k_weight * mean_geometry_score
+            k_raw *= boost
+        
         # Clamp to bounds
         recommended_k = int(np.clip(k_raw, self.config.k_min, self.config.k_max))
         
@@ -115,6 +128,7 @@ class EntropyKEstimator:
             recommended_k=recommended_k,
             reduced_embeddings=reduced,
             histogram=histogram,
+            mean_geometry_score=mean_geometry_score,
         )
     
     def estimate_from_embeddings(
@@ -136,6 +150,7 @@ class EntropyKEstimator:
             return EntropyResult(
                 entropy=0.0,
                 recommended_k=self.config.k_min,
+                mean_geometry_score=None,
             )
         
         reduced = self._reduce_dimensionality(embeddings)
@@ -154,6 +169,7 @@ class EntropyKEstimator:
             recommended_k=recommended_k,
             reduced_embeddings=reduced,
             histogram=histogram,
+            mean_geometry_score=None,
         )
     
     def _reduce_dimensionality(

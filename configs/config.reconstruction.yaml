@@ -1,0 +1,130 @@
+# Keyframe Selection Configuration - RECONSTRUCTION OPTIMIZED
+# ============================================================
+# This configuration is optimized for maximum PSNR/L1 scores.
+# Use this for:
+#   - COLMAP / 3D reconstruction
+#   - Gaussian Splatting input preparation
+#   - Video interpolation training data
+#   - Any use case where pixel-level reconstruction quality matters
+#
+# Key differences from default:
+#   - Uses K-means (representative frames) instead of DPP (diverse frames)
+#   - Higher beta (more keyframes)
+#   - Higher k_max (no artificial cap)
+#   - Lower min_frame_gap (allows temporally close keyframes)
+#   - Higher FPS sampling (captures more transitions)
+#
+# See PSNR_L1_ANALYSIS.md for detailed explanation.
+
+# Input settings
+video_path: null  # Path to video file (use this OR frame_dir)
+frame_dir: ./frames  # Path to pre-extracted frames directory
+
+# Output settings
+output_dir: ./output_reconstruction
+save_intermediate: false
+
+# Encoder Backend Selection
+# Both CLIP and DINOv3 work well for reconstruction
+# DINOv3-large may give slightly better results
+encoder_backend: dinov3
+
+# Frame Sampling (H2)
+# CRITICAL: Higher FPS = more candidate frames = better reconstruction
+frame_sampling:
+  fps: 5.0  # 5 fps captures most motion
+  adaptive: true  # Also capture scene changes
+  adaptive_threshold: 25.0
+  output_format: jpg
+  jpeg_quality: 95
+
+# DINOv3 Encoder Configuration
+dinov3_encoder:
+  model_id: "facebook/dinov2-large"  # Large model for better features
+  revision: null
+  temporal_weight: 0.15  # Moderate temporal awareness
+  pooling: cls
+  batch_size: 32
+  use_fp16: true
+  device: null
+
+# CLIP Encoder (if using encoder_backend: clip)
+clip_encoder:
+  model_name: "ViT-L/14"
+  temporal_weight: 0.15
+  batch_size: 32
+  use_fp16: true
+  device: null
+
+# Temporal Analysis (H3)
+temporal_analysis:
+  delta_percentile: 80.0  # Detect major scene changes
+  use_ema_smoothing: false
+  ema_alpha: 0.3
+  min_segment_frames: 2
+  use_gpu: true
+
+# Entropy-based K Estimation (H5, H6)
+# CRITICAL: These parameters control how many keyframes are selected
+# Higher beta = more keyframes = better reconstruction
+entropy_estimator:
+  num_bins: 50
+  beta: 3.0  # High beta for reconstruction (default was 1.0)
+  pca_components: 32
+  k_min: 20  # Minimum 20 keyframes (default was 3)
+  k_max: 500  # Allow up to 500 keyframes (default was 50)
+  epsilon: 1.0e-10
+  use_gpu: true
+
+# DPP Kernel (H7, H8)
+# Only used if method: dpp, but kept for reference
+dpp_kernel:
+  sigma_f: null
+  sigma_t_ratio: 0.3  # Larger temporal bandwidth
+  combine_method: hadamard
+  use_gpu: true
+
+# Selector (H9)
+# CRITICAL: K-means selects REPRESENTATIVE frames, not DIVERSE frames
+# This is better for reconstruction (lower PSNR error)
+selector:
+  method: kmeans  # K-means for representative frames
+
+  # DPP-specific (unused when method: kmeans)
+  mode: map  # Deterministic selection
+  fixed_k: null  # Use adaptive K from entropy estimator
+  seed: 42
+  num_samples: 1
+  min_frame_gap: 2  # Allow close keyframes (default was 5)
+  include_change_points: true
+
+  # K-means specific
+  kmeans_init: k-means++
+  kmeans_n_init: 10
+  kmeans_max_iter: 300
+  kmeans_use_gpu: true
+
+  # HDBSCAN specific (unused when method: kmeans)
+  hdbscan_min_cluster_size: 2
+  hdbscan_min_samples: 1
+  hdbscan_cluster_selection_epsilon: 0.0
+  hdbscan_cluster_selection_method: leaf
+
+  dpp_use_gpu: true
+
+# Motion Awareness (H10)
+# Enable for videos with significant motion
+motion:
+  enabled: true
+  gamma: 0.1
+  method: farneback
+  flow_scale: 0.5
+
+# Ablation Toggles
+use_temporal_encoding: true
+use_entropy_k: true
+use_temporal_kernel: false  # Disable temporal kernel for reconstruction
+
+# Global Settings
+random_seed: 42
+verbose: true

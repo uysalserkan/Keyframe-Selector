@@ -6,6 +6,7 @@ with support for ablation studies and configurable stages.
 """
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -26,6 +27,10 @@ from .entropy_estimator import EntropyKEstimator
 from .dpp_kernel import DPPKernelBuilder
 from .selector import DPPSelector
 from .motion import MotionEncoder
+from .pairwise_geometry import (
+    compute_consecutive_fundamental_scores,
+    compute_geometry_point_features,
+)
 from .utils.timing import Timer
 from .utils.io import set_global_seed, ensure_dir
 
@@ -133,10 +138,17 @@ class KeyframeSelectionPipeline:
             self._temporal_analyzer = TemporalDeltaComputer(self.config.temporal_analysis)
         return self._temporal_analyzer
     
+    def _entropy_estimator_config(self):
+        """Use geometry-aware K boost for geometric_sfm objective when not explicitly disabled."""
+        ec = self.config.entropy_estimator
+        if self.config.pipeline_objective == "geometric_sfm" and not ec.use_geometry_k:
+            return replace(ec, use_geometry_k=True)
+        return ec
+    
     @property
     def entropy_estimator(self) -> EntropyKEstimator:
         if self._entropy_estimator is None:
-            self._entropy_estimator = EntropyKEstimator(self.config.entropy_estimator)
+            self._entropy_estimator = EntropyKEstimator(self._entropy_estimator_config())
         return self._entropy_estimator
     
     @property
@@ -224,6 +236,20 @@ class KeyframeSelectionPipeline:
                         motion_features,
                     )
             timing["motion_encoding"] = t.elapsed
+        
+        # Pairwise geometry (ORB + F-matrix) for geometric_sfm / fused kernels / sequential selection
+        pairwise_cfg = self.config.pairwise_geometry
+        if self.config.pipeline_objective == "geometric_sfm" and not pairwise_cfg.enabled:
+            pairwise_cfg = replace(pairwise_cfg, enabled=True)
+        if pairwise_cfg.enabled and len(frame_batch) >= 2:
+            with Timer("2c_pairwise_geometry", log=self.config.verbose) as t:
+                scores = compute_consecutive_fundamental_scores(frame_batch, pairwise_cfg)
+                embedding_batch.geometry_consecutive_scores = scores
+                embedding_batch.geometry_point_features = compute_geometry_point_features(
+                    scores,
+                    len(frame_batch),
+                )
+            timing["pairwise_geometry"] = t.elapsed
         
         # Stage 3: Temporal change analysis
         with Timer("3_temporal_analysis", log=self.config.verbose) as t:

@@ -122,6 +122,10 @@ class EntropyEstimatorConfig:
     
     # GPU acceleration for PCA computation
     use_gpu: bool = True
+    
+    # Boost K using mean pairwise geometry score (SfM proxy)
+    use_geometry_k: bool = False
+    geometry_k_weight: float = 0.35
 
 
 @dataclass
@@ -139,14 +143,21 @@ class DPPKernelConfig:
     
     # Use GPU for kernel computation
     use_gpu: bool = True
+    
+    # Semantic vs geometric vs fused feature kernel (requires pairwise geometry when not semantic)
+    feature_source: Literal["semantic", "geometric", "fused"] = "semantic"
+    # Convex blend for fused: alpha_semantic * K_sem + (1 - alpha_semantic) * K_geo (each PSD-preserving)
+    alpha_semantic: float = 0.5
+    # Bandwidth for geometric RBF (None = median heuristic on 1 - affinity)
+    sigma_geometric: Optional[float] = None
 
 
 @dataclass
 class SelectorConfig:
     """Configuration for keyframe selection."""
     
-    # Selection method: dpp, kmeans, or hdbscan
-    method: Literal["dpp", "kmeans", "hdbscan"] = "dpp"
+    # Selection method: dpp, kmeans, hdbscan, or sequential_geometric (needs geometry scores)
+    method: Literal["dpp", "kmeans", "hdbscan", "sequential_geometric"] = "dpp"
     
     # === DPP-specific parameters ===
     # H9: DPP sampling mode (only used when method="dpp")
@@ -200,6 +211,26 @@ class SelectorConfig:
     
     # GPU acceleration for DPP greedy MAP
     dpp_use_gpu: bool = True
+    
+    # sequential_geometric: advance when bottleneck edge score >= threshold (parallax proxy)
+    sequential_min_score: float = 0.12
+    sequential_max_span: int = 45
+    
+    # Concatenate geometry point features to embeddings for K-means when True
+    kmeans_fuse_geometry_features: bool = False
+
+
+@dataclass
+class PairwiseGeometryConfig:
+    """Two-view geometry proxy on consecutive frames (ORB + fundamental matrix)."""
+    
+    enabled: bool = False
+    n_features: int = 500
+    ratio_test: float = 0.75
+    ransac_threshold: float = 1.0
+    ransac_confidence: float = 0.99
+    # Resize grayscale before ORB (1.0 = full resolution)
+    downscale: float = 0.5
 
 
 @dataclass
@@ -253,6 +284,11 @@ class PipelineConfig:
     use_entropy_k: bool = True
     use_temporal_kernel: bool = True
     
+    # Pipeline objective presets (semantic = default; geometric_sfm enables pairwise geometry)
+    pipeline_objective: Literal["semantic", "reconstruction", "geometric_sfm"] = "semantic"
+    
+    pairwise_geometry: PairwiseGeometryConfig = field(default_factory=PairwiseGeometryConfig)
+    
     # Global settings
     random_seed: int = 42
     verbose: bool = True
@@ -278,6 +314,7 @@ class PipelineConfig:
         dpp_kernel = DPPKernelConfig(**config_dict.pop("dpp_kernel", {}))
         selector = SelectorConfig(**config_dict.pop("selector", {}))
         motion = MotionConfig(**config_dict.pop("motion", {}))
+        pairwise_geometry = PairwiseGeometryConfig(**config_dict.pop("pairwise_geometry", {}))
         
         return cls(
             frame_sampling=frame_sampling,
@@ -288,6 +325,7 @@ class PipelineConfig:
             dpp_kernel=dpp_kernel,
             selector=selector,
             motion=motion,
+            pairwise_geometry=pairwise_geometry,
             **config_dict,
         )
     

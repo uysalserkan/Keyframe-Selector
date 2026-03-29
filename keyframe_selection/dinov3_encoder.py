@@ -151,14 +151,15 @@ class DINOv3TemporalEncoder:
         Returns:
             EmbeddingBatch with embeddings and metadata.
         """
-        self._ensure_model_loaded()
-        
         if len(frame_batch) == 0:
+            dim = self._embedding_dim if self._embedding_dim is not None else 768
             return EmbeddingBatch(
-                embeddings=np.array([], dtype=np.float32).reshape(0, self.embedding_dim),
+                embeddings=np.array([], dtype=np.float32).reshape(0, dim),
                 timestamps=np.array([]),
                 frame_indices=np.array([]),
             )
+        
+        self._ensure_model_loaded()
         
         logger.info(f"Encoding {len(frame_batch)} frames with DINOv3")
         

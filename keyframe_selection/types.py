@@ -72,6 +72,12 @@ class EmbeddingBatch:
     # Optional motion features: shape (N, motion_dim)
     motion_features: Optional[NDArray[np.float32]] = None
     
+    # Consecutive pairwise geometry scores (e.g. F-matrix inlier ratio), shape (N-1,)
+    geometry_consecutive_scores: Optional[NDArray[np.float64]] = None
+    
+    # Optional per-frame geometric features for K-means fusion, shape (N, D_g)
+    geometry_point_features: Optional[NDArray[np.float32]] = None
+    
     def __len__(self) -> int:
         return len(self.embeddings)
     
@@ -128,6 +134,9 @@ class EntropyResult:
     
     # Histogram used for entropy calculation
     histogram: Optional[NDArray[np.float64]] = None
+    
+    # Mean consecutive geometry score when use_geometry_k is enabled
+    mean_geometry_score: Optional[float] = None
 
 
 @dataclass
@@ -143,9 +152,13 @@ class DPPKernel:
     # Temporal similarity kernel
     temporal_kernel: Optional[NDArray[np.float64]] = None
     
+    # Geometric similarity kernel (pairwise two-view proxy), optional
+    geometric_kernel: Optional[NDArray[np.float64]] = None
+    
     # Bandwidth parameters used
     sigma_f: float = 0.0
     sigma_t: float = 0.0
+    sigma_g: float = 0.0
     
     @property
     def size(self) -> int:

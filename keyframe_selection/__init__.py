@@ -35,6 +35,7 @@ from .config import (
     DPPKernelConfig,
     SelectorConfig,
     MotionConfig,
+    PairwiseGeometryConfig,
 )
 from .types import (
     FrameBatch,
@@ -60,6 +61,7 @@ __all__ = [
     "DPPKernelConfig",
     "SelectorConfig",
     "MotionConfig",
+    "PairwiseGeometryConfig",
     # Data types
     "FrameBatch",
     "FrameData",
