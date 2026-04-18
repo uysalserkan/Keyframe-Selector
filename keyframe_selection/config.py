@@ -34,6 +34,9 @@ class FrameSamplingConfig:
     # Output settings
     output_format: str = "jpg"
     jpeg_quality: int = 95
+    # Parallel cv2.imread when loading a frame directory (see min_frames_for_parallel_load)
+    parallel_load_frames: bool = True
+    min_frames_for_parallel_load: int = 16
 
 
 @dataclass
@@ -231,6 +234,10 @@ class PairwiseGeometryConfig:
     ransac_confidence: float = 0.99
     # Resize grayscale before ORB (1.0 = full resolution)
     downscale: float = 0.5
+    # Parallelize consecutive frame-pair ORB/F-matrix (ThreadPoolExecutor)
+    parallel_pairs: bool = True
+    # Use thread pool only when there are at least this many pairs
+    min_pairs_for_parallel: int = 8
 
 
 @dataclass
@@ -292,6 +299,8 @@ class PipelineConfig:
     # Global settings
     random_seed: int = 42
     verbose: bool = True
+    # None = all logical CPUs (see utils.threading_env.resolve_num_threads)
+    num_threads: Optional[int] = None
     
     def __post_init__(self):
         """Convert paths to Path objects if needed."""

@@ -13,10 +13,11 @@ from numpy.typing import NDArray
 @dataclass
 class FrameData:
     """Single frame with metadata."""
-    
-    image: NDArray[np.uint8]  # BGR format from OpenCV
+
     timestamp: float  # Seconds from video start
     frame_index: int  # Original frame index in video
+    # BGR from OpenCV; None when frame was written to disk only (memory-efficient path)
+    image: Optional[NDArray[np.uint8]] = None
     path: Optional[Path] = None  # Path if loaded from disk
 
 
@@ -37,8 +38,10 @@ class FrameBatch:
     
     @property
     def images(self) -> List[NDArray[np.uint8]]:
-        """Get all images as a list."""
-        return [f.image for f in self.frames]
+        """Get all images as a list (loads from disk when ``image`` is None)."""
+        from .utils.frame_image import load_frame_bgr
+
+        return [load_frame_bgr(f) for f in self.frames]
     
     @property
     def timestamps(self) -> NDArray[np.float64]:

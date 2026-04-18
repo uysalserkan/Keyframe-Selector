@@ -36,6 +36,7 @@ if __name__ == "__main__":
 from keyframe_selection import PipelineConfig
 from keyframe_selection.pipeline import KeyframeSelectionPipeline
 from keyframe_selection.utils.io import setup_logging, load_config, save_config
+from keyframe_selection.utils.threading_env import resolve_num_threads
 
 
 def parse_args() -> argparse.Namespace:
@@ -290,6 +291,14 @@ Examples:
         help="Random seed (default: 42)",
     )
     other_group.add_argument(
+        "--threads",
+        type=int,
+        default=None,
+        metavar="N",
+        help="CPU thread count for OpenCV, PyTorch CPU, sklearn, and parallel I/O/geometry "
+             "(default: all logical cores; override KEYFRAME_NUM_THREADS)",
+    )
+    other_group.add_argument(
         "--verbose",
         action="store_true",
         help="Enable verbose logging",
@@ -420,6 +429,8 @@ def main():
     
     # Build config
     config = build_config(args)
+    if args.threads is not None:
+        config.num_threads = args.threads
     
     # Validate we have input
     if config.video_path is None and config.frame_dir is None:
@@ -456,6 +467,10 @@ def main():
         logger.info(f"HDBSCAN min_cluster_size: {config.selector.hdbscan_min_cluster_size}")
     if config.selector.fixed_k:
         logger.info(f"Fixed K: {config.selector.fixed_k}")
+    logger.info(
+        f"CPU threads (effective): {resolve_num_threads(config.num_threads)} "
+        f"(OpenCV/sklearn pools; use --threads or num_threads in YAML to cap)"
+    )
     logger.info("=" * 60)
     
     # Run pipeline

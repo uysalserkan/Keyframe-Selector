@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 
 from .config import MotionConfig
 from .types import FrameBatch, FrameData
+from .utils.frame_image import load_frame_bgr
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +151,7 @@ class MotionEncoder:
         prev_gray = None
         
         for frame_data in frame_batch.frames:
-            img = frame_data.image
+            img = load_frame_bgr(frame_data)
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             
             # Optionally downscale for speed
@@ -241,8 +242,8 @@ class MotionEncoder:
         
         with torch.no_grad():
             for frame_data in frame_batch.frames:
-                img = frame_data.image
-                
+                img = load_frame_bgr(frame_data)
+
                 # Convert BGR to RGB and normalize
                 img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 

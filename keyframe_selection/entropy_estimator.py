@@ -199,7 +199,11 @@ class EntropyKEstimator:
         if n_components < 1:
             return embeddings
         
-        self._pca = PCA(n_components=n_components)
+        try:
+            self._pca = PCA(n_components=n_components, n_jobs=-1)
+        except TypeError:
+            # Older sklearn: no n_jobs on PCA
+            self._pca = PCA(n_components=n_components)
         reduced = self._pca.fit_transform(embeddings)
         
         logger.debug(

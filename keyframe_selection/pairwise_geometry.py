@@ -9,7 +9,8 @@ without known intrinsics (F-matrix; E-matrix optional if K known later).
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+from concurrent.futures import ThreadPoolExecutor
+from typing import List, Optional, Sequence
 
 import cv2
 import numpy as np
@@ -17,13 +18,27 @@ from numpy.typing import NDArray
 
 from .config import PairwiseGeometryConfig
 from .types import FrameBatch, FrameData
+from .utils.frame_image import load_frame_bgr
+from .utils.threading_env import get_last_configured_num_threads
 
 logger = logging.getLogger(__name__)
+
+
+def _pair_inlier_ratio_one_pair(
+    a: FrameData,
+    b: FrameData,
+    cfg: PairwiseGeometryConfig,
+) -> float:
+    """ORB + F-matrix for one pair (own ORB/BFMatcher — safe for thread pools)."""
+    orb = cv2.ORB_create(nfeatures=cfg.n_features)
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+    return _pair_inlier_ratio(a, b, orb, bf, cfg)
 
 
 def compute_consecutive_fundamental_scores(
     frame_batch: FrameBatch,
     config: Optional[PairwiseGeometryConfig] = None,
+    max_workers: Optional[int] = None,
 ) -> NDArray[np.float64]:
     """
     For each consecutive pair (i, i+1), return RANSAC inlier ratio for estimated F.
@@ -39,19 +54,39 @@ def compute_consecutive_fundamental_scores(
     if len(frames) < 2:
         return np.array([], dtype=np.float64)
 
-    scores: List[float] = []
-    orb = cv2.ORB_create(nfeatures=cfg.n_features)
-    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+    n_pairs = len(frames) - 1
+    workers_cap = max_workers if max_workers is not None else get_last_configured_num_threads()
+    workers_cap = max(1, min(workers_cap, 32, n_pairs))
 
-    for i in range(len(frames) - 1):
-        s = _pair_inlier_ratio(
-            frames[i],
-            frames[i + 1],
-            orb,
-            bf,
-            cfg,
+    use_parallel = (
+        cfg.parallel_pairs
+        and n_pairs >= cfg.min_pairs_for_parallel
+        and workers_cap > 1
+    )
+
+    if use_parallel:
+        prev_cv2_threads = cv2.getNumThreads()
+        cv2.setNumThreads(1)
+        def _run_pair(i: int) -> float:
+            return _pair_inlier_ratio_one_pair(frames[i], frames[i + 1], cfg)
+
+        try:
+            with ThreadPoolExecutor(max_workers=workers_cap) as ex:
+                scores = list(ex.map(_run_pair, range(n_pairs)))
+        finally:
+            cv2.setNumThreads(prev_cv2_threads)
+        logger.debug(
+            "Pairwise geometry: %d pairs on %d worker threads",
+            n_pairs,
+            workers_cap,
         )
-        scores.append(s)
+    else:
+        scores = []
+        orb = cv2.ORB_create(nfeatures=cfg.n_features)
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+        for i in range(n_pairs):
+            s = _pair_inlier_ratio(frames[i], frames[i + 1], orb, bf, cfg)
+            scores.append(s)
 
     return np.asarray(scores, dtype=np.float64)
 
@@ -63,11 +98,25 @@ def _pair_inlier_ratio(
     bf: cv2.BFMatcher,
     cfg: PairwiseGeometryConfig,
 ) -> float:
-    gray_a = cv2.cvtColor(a.image, cv2.COLOR_BGR2GRAY)
-    gray_b = cv2.cvtColor(b.image, cv2.COLOR_BGR2GRAY)
+    try:
+        bgr_a = load_frame_bgr(a)
+        bgr_b = load_frame_bgr(b)
+    except (OSError, ValueError) as e:
+        logger.debug("Skipping geometry pair (load failed): %s", e)
+        return 0.0
+
+    try:
+        gray_a = cv2.cvtColor(bgr_a, cv2.COLOR_BGR2GRAY)
+        gray_b = cv2.cvtColor(bgr_b, cv2.COLOR_BGR2GRAY)
+    except cv2.error as e:
+        logger.debug("Skipping geometry pair (cvtColor): %s", e)
+        return 0.0
+
     if cfg.downscale != 1.0:
         h, w = gray_a.shape[:2]
-        nw, nh = int(w * cfg.downscale), int(h * cfg.downscale)
+        # int(w * d) can be 0 on tiny images; OpenCV then asserts in Mat row ranges
+        nw = max(1, int(w * cfg.downscale))
+        nh = max(1, int(h * cfg.downscale))
         gray_a = cv2.resize(gray_a, (nw, nh))
         gray_b = cv2.resize(gray_b, (nw, nh))
 
@@ -83,16 +132,36 @@ def _pair_inlier_ratio(
     if len(matches) < 8:
         return 0.0
 
-    pts1 = np.float32([kp1[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
-    pts2 = np.float32([kp2[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
+    def _pts_from_matches(
+        kps: Sequence,
+        ms: Sequence,
+        idx_attr: str,
+    ) -> Optional[np.ndarray]:
+        pts = []
+        for m in ms:
+            idx = getattr(m, idx_attr)
+            if idx < 0 or idx >= len(kps):
+                return None
+            pts.append(kps[idx].pt)
+        return np.float32(pts).reshape(-1, 1, 2)
 
-    F, mask = cv2.findFundamentalMat(
-        pts1,
-        pts2,
-        cv2.FM_RANSAC,
-        cfg.ransac_threshold,
-        cfg.ransac_confidence,
-    )
+    pts1 = _pts_from_matches(kp1, matches, "queryIdx")
+    pts2 = _pts_from_matches(kp2, matches, "trainIdx")
+    if pts1 is None or pts2 is None:
+        return 0.0
+
+    try:
+        F, mask = cv2.findFundamentalMat(
+            pts1,
+            pts2,
+            cv2.FM_RANSAC,
+            cfg.ransac_threshold,
+            cfg.ransac_confidence,
+        )
+    except cv2.error as e:
+        logger.debug("findFundamentalMat failed (degenerate pair): %s", e)
+        return 0.0
+
     if F is None or mask is None:
         return 0.0
     inliers = int(mask.ravel().sum())

@@ -1,4 +1,9 @@
-# Core deep learning
+# Core deep learning (CUDA 13.0)
+# Default `pip install -r requirements.txt` may install CPU-only torch. For GPU + CUDA 13.0:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+# Use a PyTorch release that publishes cu130 wheels (see https://pytorch.org/get-started/locally/).
+# When compiling CUDA extensions (e.g. 3DGS submodules), set CUDA_HOME to the same major CUDA
+#   so nvcc matches torch.version.cuda (e.g. export CUDA_HOME=/usr/local/cuda-13.0).
 torch>=2.0.0
 torchvision>=0.15.0
 

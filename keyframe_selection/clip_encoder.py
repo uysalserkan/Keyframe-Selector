@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 
 from .config import CLIPEncoderConfig
 from .types import EmbeddingBatch, FrameBatch, FrameData
+from .utils.frame_image import load_frame_bgr
 from .utils.timing import Timer
 
 logger = logging.getLogger(__name__)
@@ -122,9 +123,9 @@ class CLIPTemporalEncoder:
         
         logger.info(f"Encoding {len(frame_batch)} frames with CLIP")
         
-        # Extract base embeddings
+        # Extract base embeddings (load pixels per batch — avoids RAM spike from .images)
         with Timer("clip_encoding"):
-            embeddings = self._batch_encode(frame_batch.images)
+            embeddings = self._batch_encode_frames(frame_batch.frames)
         
         # Gather metadata (optimized: direct array access)
         timestamps = frame_batch.timestamps
@@ -205,6 +206,20 @@ class CLIPTemporalEncoder:
             frame_indices=frame_indices,
         )
     
+    def _batch_encode_frames(self, frames: List[FrameData]) -> NDArray[np.float32]:
+        """Encode frames, loading BGR from disk only within each mini-batch."""
+        all_embeddings = []
+        batch_size = self.config.batch_size
+
+        with torch.no_grad():
+            for i in range(0, len(frames), batch_size):
+                slice_frames = frames[i : i + batch_size]
+                batch_images = [load_frame_bgr(f) for f in slice_frames]
+                batch_embs = self._batch_encode_numpy_list(batch_images)
+                all_embeddings.append(batch_embs)
+
+        return np.vstack(all_embeddings).astype(np.float32)
+
     def _batch_encode(self, images: List[np.ndarray]) -> NDArray[np.float32]:
         """
         Encode images in batches.
@@ -215,9 +230,12 @@ class CLIPTemporalEncoder:
         Returns:
             Normalized embeddings of shape (N, D).
         """
+        return self._batch_encode_numpy_list(images)
+
+    def _batch_encode_numpy_list(self, images: List[np.ndarray]) -> NDArray[np.float32]:
         all_embeddings = []
         batch_size = self.config.batch_size
-        
+
         with torch.no_grad():
             for i in range(0, len(images), batch_size):
                 batch_images = images[i:i + batch_size]

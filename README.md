@@ -26,6 +26,28 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+### GPU stack (CUDA 13)
+
+This project targets **CUDA 13.x** (documented here as **13.0** / `cu130`) for PyTorch and for compiling CUDA extensions (e.g. Gaussian splatting–style submodules). Use a **recent PyTorch** build that ships CUDA 13 wheels—see [PyTorch Get Started](https://pytorch.org/get-started/locally/) if the command below changes.
+
+1. **Install the CUDA 13.0 toolkit** from NVIDIA so `nvcc --version` reports 13.0 (toolkit path is often `/usr/local/cuda-13.0`). Your **display driver** must be new enough for that toolkit.
+2. **Install PyTorch built for cu130** (instead of the default CPU wheel):
+
+   ```bash
+   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+   ```
+
+3. **Before building extensions**, point the compiler at the same toolkit:
+
+   ```bash
+   export CUDA_HOME=/usr/local/cuda-13.0
+   export PATH="$CUDA_HOME/bin:$PATH"
+   ```
+
+   With conda, install **`pytorch-cuda`** from the `pytorch` and `nvidia` channels with a version that matches CUDA 13 (e.g. `13.0` if offered).
+
+**Note:** CUDA 13 builds of PyTorch target **newer GPUs** only (e.g. Turing and later on many Linux builds). Older GPUs may need an older CUDA/PyTorch pair from the same install page.
+
 ## Quick Start
 
 ### Command Line

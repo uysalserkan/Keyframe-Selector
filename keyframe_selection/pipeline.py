@@ -33,6 +33,7 @@ from .pairwise_geometry import (
 )
 from .utils.timing import Timer
 from .utils.io import set_global_seed, ensure_dir
+from .utils.threading_env import configure_host_threading, get_last_configured_num_threads
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +191,8 @@ class KeyframeSelectionPipeline:
         
         if video_path is None and frame_dir is None:
             raise ValueError("Either video_path or frame_dir must be provided")
+
+        configure_host_threading(self.config.num_threads)
         
         timing = {}
         
@@ -204,6 +207,7 @@ class KeyframeSelectionPipeline:
                 frame_batch = self.frame_sampler.load_frames_from_directory(
                     frame_dir,
                     video_fps=self.config.frame_sampling.fps,
+                    max_workers=get_last_configured_num_threads(),
                 )
         timing["frame_sampling"] = t.elapsed
         
@@ -243,7 +247,11 @@ class KeyframeSelectionPipeline:
             pairwise_cfg = replace(pairwise_cfg, enabled=True)
         if pairwise_cfg.enabled and len(frame_batch) >= 2:
             with Timer("2c_pairwise_geometry", log=self.config.verbose) as t:
-                scores = compute_consecutive_fundamental_scores(frame_batch, pairwise_cfg)
+                scores = compute_consecutive_fundamental_scores(
+                    frame_batch,
+                    pairwise_cfg,
+                    max_workers=get_last_configured_num_threads(),
+                )
                 embedding_batch.geometry_consecutive_scores = scores
                 embedding_batch.geometry_point_features = compute_geometry_point_features(
                     scores,
@@ -360,10 +368,13 @@ class KeyframeSelectionPipeline:
                 dst = keyframes_dir / f"keyframe_{i:04d}{ext}"
                 shutil.copy(frame_data.path, dst)
             else:
-                # Save from memory
+                # In-memory only (no extracted path): write from buffer
                 import cv2
+
+                from .utils.frame_image import load_frame_bgr
+
                 dst = keyframes_dir / f"keyframe_{i:04d}.jpg"
-                cv2.imwrite(str(dst), frame_data.image)
+                cv2.imwrite(str(dst), load_frame_bgr(frame_data))
         
         # Save metadata
         metadata = {

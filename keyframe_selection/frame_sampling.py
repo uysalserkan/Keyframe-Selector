@@ -5,6 +5,7 @@ Supports fixed FPS sampling and adaptive scene-change-based sampling.
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Generator, List, Optional, Tuple, Union
 
@@ -14,6 +15,7 @@ from PIL import Image
 
 from .config import FrameSamplingConfig
 from .types import FrameBatch, FrameData
+from .utils.threading_env import get_last_configured_num_threads
 from .utils.timing import Timer
 
 logger = logging.getLogger(__name__)
@@ -119,13 +121,25 @@ class FrameSampler:
                         if output_dir is not None:
                             frame_path = output_dir / f"frame_{saved_idx:04d}.{self.config.output_format}"
                             self._save_frame(frame, frame_path)
-                        
-                        frames.append(FrameData(
-                            image=frame,
-                            timestamp=timestamp,
-                            frame_index=frame_idx,
-                            path=frame_path,
-                        ))
+                            # Disk-backed frames: do not retain full BGR buffers in RAM
+                            # (avoids OOM on long / high-res videos; encoders load in batches).
+                            frames.append(
+                                FrameData(
+                                    image=None,
+                                    timestamp=timestamp,
+                                    frame_index=frame_idx,
+                                    path=frame_path,
+                                )
+                            )
+                        else:
+                            frames.append(
+                                FrameData(
+                                    image=frame,
+                                    timestamp=timestamp,
+                                    frame_index=frame_idx,
+                                    path=None,
+                                )
+                            )
                         saved_idx += 1
                     
                     # Only store prev_frame if adaptive mode is enabled
@@ -134,7 +148,17 @@ class FrameSampler:
                     frame_idx += 1
             
             logger.info(f"Extracted {len(frames)} frames")
-            
+            if (
+                frames
+                and frames[0].path is not None
+                and frames[0].image is None
+            ):
+                logger.info(
+                    "Disk-backed frame sampling: %d frames on disk (low RAM); "
+                    "encoders load images in batches.",
+                    len(frames),
+                )
+
             return FrameBatch(
                 frames=frames,
                 video_duration=duration,
@@ -208,6 +232,7 @@ class FrameSampler:
         frame_dir: Union[str, Path],
         pattern: str = "*.jpg",
         video_fps: float = 1.0,
+        max_workers: Optional[int] = None,
     ) -> FrameBatch:
         """
         Load pre-extracted frames from a directory.
@@ -238,25 +263,62 @@ class FrameSampler:
         
         logger.info(f"Loading {len(frame_paths)} frames from {frame_dir}")
         
-        frames: List[FrameData] = []
         inv_video_fps = 1.0 / video_fps if video_fps > 0 else 0.0
-        
+        cfg = self.config
+        workers_cap = max_workers if max_workers is not None else get_last_configured_num_threads()
+        workers_cap = max(1, min(workers_cap, 32, len(frame_paths)))
+        use_parallel = (
+            cfg.parallel_load_frames
+            and len(frame_paths) >= cfg.min_frames_for_parallel_load
+            and workers_cap > 1
+        )
+
+        frames: List[FrameData] = []
         with Timer("load_frames"):
-            for idx, path in enumerate(frame_paths):
-                # Load image with OpenCV (BGR format)
-                image = cv2.imread(str(path))
-                if image is None:
-                    logger.warning(f"Could not load: {path}")
-                    continue
-                
-                timestamp = idx * inv_video_fps
-                
-                frames.append(FrameData(
-                    image=image,
-                    timestamp=timestamp,
-                    frame_index=idx,
-                    path=path,
-                ))
+            if use_parallel:
+                prev_cv2 = cv2.getNumThreads()
+                cv2.setNumThreads(1)
+                try:
+                    slots: List[Optional[FrameData]] = [None] * len(frame_paths)
+                    paths_list = frame_paths
+
+                    def _load_at_index(i: int) -> None:
+                        path = paths_list[i]
+                        image = cv2.imread(str(path))
+                        if image is None:
+                            logger.warning(f"Could not load: {path}")
+                            return
+                        slots[i] = FrameData(
+                            image=image,
+                            timestamp=i * inv_video_fps,
+                            frame_index=i,
+                            path=path,
+                        )
+
+                    with ThreadPoolExecutor(max_workers=workers_cap) as ex:
+                        list(ex.map(_load_at_index, range(len(paths_list))))
+                    frames = [f for f in slots if f is not None]
+                finally:
+                    cv2.setNumThreads(prev_cv2)
+                logger.debug(
+                    "Parallel frame load: %d files, %d workers",
+                    len(frame_paths),
+                    workers_cap,
+                )
+            else:
+                for idx, path in enumerate(frame_paths):
+                    image = cv2.imread(str(path))
+                    if image is None:
+                        logger.warning(f"Could not load: {path}")
+                        continue
+                    frames.append(
+                        FrameData(
+                            image=image,
+                            timestamp=idx * inv_video_fps,
+                            frame_index=idx,
+                            path=path,
+                        )
+                    )
         
         duration = len(frames) / video_fps if video_fps > 0 else 0.0
         

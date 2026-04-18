@@ -22,6 +22,26 @@ from .types import DPPKernel, EmbeddingBatch, KeyframeResult
 
 logger = logging.getLogger(__name__)
 
+
+def _sklearn_fit_predict_parallel(estimator, X: np.ndarray) -> np.ndarray:
+    """Use all cores for sklearn clusterers when parallel_config / joblib is available."""
+    try:
+        from sklearn.utils.parallel import parallel_config
+
+        with parallel_config(n_jobs=-1, backend="threading"):
+            return estimator.fit_predict(X)
+    except ImportError:
+        pass
+    try:
+        import joblib
+
+        with joblib.parallel_backend("threading", n_jobs=-1):
+            return estimator.fit_predict(X)
+    except Exception:
+        pass
+    return estimator.fit_predict(X)
+
+
 # Lazy import dppy
 _dpp_available = None
 
@@ -637,7 +657,7 @@ class DPPSelector:
             max_iter=self.config.kmeans_max_iter,
             random_state=self.config.seed,
         )
-        labels = kmeans.fit_predict(embeddings)
+        labels = _sklearn_fit_predict_parallel(kmeans, embeddings)
         
         # Select medoid from each cluster
         selected_indices = []
@@ -720,13 +740,22 @@ class DPPSelector:
         if min_samples is None:
             min_samples = self.config.hdbscan_min_cluster_size
         
-        hdbscan = HDBSCAN(
-            min_cluster_size=self.config.hdbscan_min_cluster_size,
-            min_samples=min_samples,
-            cluster_selection_epsilon=self.config.hdbscan_cluster_selection_epsilon,
-            cluster_selection_method=self.config.hdbscan_cluster_selection_method,
-        )
-        labels = hdbscan.fit_predict(embeddings)
+        try:
+            hdbscan = HDBSCAN(
+                min_cluster_size=self.config.hdbscan_min_cluster_size,
+                min_samples=min_samples,
+                cluster_selection_epsilon=self.config.hdbscan_cluster_selection_epsilon,
+                cluster_selection_method=self.config.hdbscan_cluster_selection_method,
+                n_jobs=-1,
+            )
+        except TypeError:
+            hdbscan = HDBSCAN(
+                min_cluster_size=self.config.hdbscan_min_cluster_size,
+                min_samples=min_samples,
+                cluster_selection_epsilon=self.config.hdbscan_cluster_selection_epsilon,
+                cluster_selection_method=self.config.hdbscan_cluster_selection_method,
+            )
+        labels = _sklearn_fit_predict_parallel(hdbscan, embeddings)
         
         # Select medoid from each cluster (including noise cluster -1)
         unique_labels = np.unique(labels)
